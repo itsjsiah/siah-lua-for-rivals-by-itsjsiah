@@ -1297,6 +1297,10 @@ local function setupCleanupAll(ctx)
     end
 end
 local function loadMainScript()
+    if getgenv().SIAH_LUA_LOADED then
+        return
+    end
+    getgenv().SIAH_LUA_LOADED = true
     local repo = "https://raw.githubusercontent.com/mstudio45/LinoriaLib/main/"
     local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
     local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
@@ -3146,53 +3150,115 @@ local function loadMainScript()
         end
     })
 
-    local SIAH_LOADSTRING = [[loadstring(game:HttpGet("https://raw.githubusercontent.com/itsjsiah/siah-lua-for-rivals-by-itsjsiah/refs/heads/main/main.lua"))()]]
+
+    -- ========== AUTO LOAD (hard) ==========
+    local SIAH_URL = "https://raw.githubusercontent.com/itsjsiah/siah-lua-for-rivals-by-itsjsiah/refs/heads/main/main.lua"
+    local SIAH_LOADSTRING = 'loadstring(game:HttpGet("' .. SIAH_URL .. '"))()'
+    local AUTOLOAD_FLAG = "siah_rivals_autoload.txt"
+
+    local function queueScript()
+        local code = SIAH_LOADSTRING
+        local ok = false
+        -- every known queue API
+        pcall(function()
+            if syn and syn.queue_on_teleport then syn.queue_on_teleport(code) ok = true end
+        end)
+        pcall(function()
+            if queue_on_teleport then queue_on_teleport(code) ok = true end
+        end)
+        pcall(function()
+            if queueonteleport then queueonteleport(code) ok = true end
+        end)
+        pcall(function()
+            if fluxus and fluxus.queue_on_teleport then fluxus.queue_on_teleport(code) ok = true end
+        end)
+        pcall(function()
+            if KRNL_LOADED and queue_on_teleport then queue_on_teleport(code) ok = true end
+        end)
+        pcall(function()
+            if identifyexecutor then
+                -- some executors expose it globally under different names
+                local env = getgenv()
+                if env.queue_on_teleport then env.queue_on_teleport(code) ok = true end
+            end
+        end)
+        return ok
+    end
+
     local function applyAutoLoad(on)
         getgenv().SIAH_AUTOLOAD = on and true or false
         pcall(function()
             if on then
-                writefile("siah_rivals_autoload.txt", "1")
-                -- queue for teleport / server hop / rejoin same session chain
-                if syn and syn.queue_on_teleport then
-                    syn.queue_on_teleport(SIAH_LOADSTRING)
-                elseif queue_on_teleport then
-                    queue_on_teleport(SIAH_LOADSTRING)
-                elseif queueonteleport then
-                    queueonteleport(SIAH_LOADSTRING)
-                end
+                writefile(AUTOLOAD_FLAG, "1")
+                queueScript()
             else
-                if isfile("siah_rivals_autoload.txt") then delfile("siah_rivals_autoload.txt") end
-                -- clear queue if supported (most executors only clear by not re-queuing)
-                if syn and syn.queue_on_teleport then
-                    syn.queue_on_teleport("")
-                elseif queue_on_teleport then
-                    queue_on_teleport("")
-                end
+                if isfile(AUTOLOAD_FLAG) then delfile(AUTOLOAD_FLAG) end
+                getgenv().SIAH_AUTOLOAD = false
             end
         end)
     end
-    -- restore previous preference
+
+    -- restore + re-queue every time script runs if flag exists
     local autoloadWanted = false
     pcall(function()
-        if isfile("siah_rivals_autoload.txt") then
+        if isfile(AUTOLOAD_FLAG) and readfile(AUTOLOAD_FLAG) == "1" then
             autoloadWanted = true
-            applyAutoLoad(true)
         end
     end)
+    if autoloadWanted then
+        applyAutoLoad(true)
+    end
+
+    -- TeleportService: re-queue right before leaving (most reliable for server hops)
+    pcall(function()
+        local TeleportService = game:GetService("TeleportService")
+        TeleportService.TeleportInitFailed:Connect(function()
+            if getgenv().SIAH_AUTOLOAD then queueScript() end
+        end)
+        -- LocalPlayer OnTeleport (fires on client when teleport starts)
+        if lp.OnTeleport then
+            lp.OnTeleport:Connect(function(State)
+                if getgenv().SIAH_AUTOLOAD then
+                    queueScript()
+                end
+            end)
+        end
+    end)
+
+    -- also re-queue on game:BindToClose / when leaving
+    pcall(function()
+        game:BindToClose(function()
+            if getgenv().SIAH_AUTOLOAD then
+                queueScript()
+            end
+        end)
+    end)
+
+    -- periodic re-queue while enabled (some executors drop the queue)
+    task.spawn(function()
+        while true do
+            task.wait(8)
+            if getgenv().SIAH_AUTOLOAD then
+                queueScript()
+            end
+        end
+    end)
+
     MiscGroup3:AddToggle("SCRIPT_AUTOLOAD", {
         Text = "Auto Load Script",
         Default = autoloadWanted,
         Callback = function(Value)
             applyAutoLoad(Value)
             if Value then
-                Library:Notify("Auto Load ON — will re-run after teleport/server hop", 4)
+                local queued = queueScript()
+                Library:Notify(queued and "Auto Load ON (queued)" or "Auto Load ON — put loadstring in autoexec for cold start", 4)
             else
                 Library:Notify("Auto Load OFF", 2)
             end
         end
     })
-    MiscGroup3:AddLabel("uses queue_on_teleport")
-    MiscGroup3:AddLabel("for full cold-start put in autoexec")
+    MiscGroup3:AddLabel("server hop / teleport: auto")
+    MiscGroup3:AddLabel("full restart: use autoexec")
 
     MiscGroup3:AddButton({
         Text = "Unload",
@@ -3444,6 +3510,7 @@ local function loadMainScript()
         end
     end)
     Library:OnUnload(function()
+        getgenv().SIAH_LUA_LOADED = false
         WatermarkConnection:Disconnect()
         cleanupAll()
         print("siah lua for rivals by itsjsiah Unloaded!")
