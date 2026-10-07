@@ -1,3 +1,107 @@
+-[[
+  siah lua for rivals by itsjsiah
+  universal executor compat layer
+]]
+
+-- safe env
+local function safe_getgenv()
+    local ok, g = pcall(function() return getgenv() end)
+    if ok and type(g) == "table" then return g end
+    local ok2, g2 = pcall(function() return _G end)
+    if ok2 and type(g2) == "table" then return g2 end
+    return {}
+end
+getgenv = getgenv or safe_getgenv
+local GENV = safe_getgenv()
+
+-- prevent hard crash on missing UNC
+local function stub() end
+local function identity(x) return x end
+
+cloneref = cloneref or clonereference or identity
+clonefunction = clonefunction or copyfunction or identity
+newcclosure = newcclosure or protect_function or identity
+setreadonly = setreadonly or function(t, r) pcall(function() table.freeze(t) end) end
+getrawmetatable = getrawmetatable or debug.getmetatable or getmetatable
+setrawmetatable = setrawmetatable or debug.setmetatable or setmetatable
+getnamecallmethod = getnamecallmethod or get_namecall_method or function() return "" end
+checkcaller = checkcaller or function() return true end
+islclosure = islclosure or is_l_closure or function() return true end
+isfile = isfile or function() return false end
+isfolder = isfolder or function() return false end
+writefile = writefile or function() end
+readfile = readfile or function() return "" end
+delfile = delfile or function() end
+makefolder = makefolder or function() end
+listfiles = listfiles or function() return {} end
+appendfile = appendfile or function() end
+
+-- hookfunction / hookmetamethod soft fallbacks
+if not hookfunction then
+    hookfunction = function(old, new)
+        -- last resort: just return new, may not actually hook on weak execs
+        return new
+    end
+end
+if not hookmetamethod then
+    hookmetamethod = function(obj, method, fn)
+        local ok, mt = pcall(getrawmetatable, obj)
+        if not ok or not mt then return fn end
+        local old = mt[method]
+        pcall(function()
+            setreadonly(mt, false)
+            mt[method] = newcclosure(fn)
+            setreadonly(mt, true)
+        end)
+        return old
+    end
+end
+
+-- Drawing polyfill (Real / weak UNC)
+if not Drawing or not Drawing.new then
+    local DrawingAPI = {}
+    DrawingAPI.Fonts = { UI = 0, System = 0, Plex = 0, Monospace = 0 }
+    function DrawingAPI.new(class)
+        local proxy = {
+            Visible = false,
+            Transparency = 1,
+            Color = Color3.new(1,1,1),
+            Thickness = 1,
+            From = Vector2.new(),
+            To = Vector2.new(),
+            Size = 0,
+            Position = Vector2.new(),
+            Text = "",
+            Center = false,
+            Outline = false,
+            OutlineColor = Color3.new(),
+            Font = 0,
+            Filled = false,
+            ZIndex = 0,
+            Remove = function(self) self.Visible = false end,
+            Destroy = function(self) self.Visible = false end,
+        }
+        return proxy
+    end
+    Drawing = DrawingAPI
+end
+
+-- queue_on_teleport polyfill already handled later
+
+-- safe HttpGet for loadstring deps
+local function safeHttpGet(url)
+    local ok, res = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok then return res end
+    ok, res = pcall(function()
+        return game:HttpGetAsync(url)
+    end)
+    if ok then return res end
+    return nil
+end
+
+
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
@@ -64,28 +168,51 @@ local oldInputFunc = nil
 local function StartRapidFire()
     if rapidFireEnabled then return end
     rapidFireEnabled = true
-    local clientItemModule = require(game:GetService("Players").LocalPlayer.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem)
-    local inputFunc = clientItemModule.Input
-    oldInputFunc = hookfunction(inputFunc, function(...)
-        local args = {...}
-        if type(args[1]) == "table" then
-            args[1].Info.ShootRecoil = 0
-            args[1].Info.ShootSpread = 0
-            args[1].Info.ProjectileSpeed = 99999999
-            args[1].Info.ShootCooldown = 0
-            args[1].Info.QuickShotCooldown = 0
-        end
-        return oldInputFunc(...)
+    pcall(function()
+        local ps = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerScripts")
+        if not ps then return end
+        local mod = ps:FindFirstChild("Modules")
+        if not mod then return end
+        local path = mod:FindFirstChild("ClientReplicatedClasses")
+        path = path and path:FindFirstChild("ClientFighter")
+        path = path and path:FindFirstChild("ClientItem")
+        if not path then return end
+        local clientItemModule = require(path)
+        if not clientItemModule or not clientItemModule.Input then return end
+        local inputFunc = clientItemModule.Input
+        oldInputFunc = hookfunction(inputFunc, function(...)
+            local args = {...}
+            if type(args[1]) == "table" and args[1].Info then
+                pcall(function()
+                    args[1].Info.ShootRecoil = 0
+                    args[1].Info.ShootSpread = 0
+                    args[1].Info.ProjectileSpeed = 99999999
+                    args[1].Info.ShootCooldown = 0
+                    args[1].Info.QuickShotCooldown = 0
+                end)
+            end
+            if oldInputFunc then return oldInputFunc(...) end
+        end)
     end)
 end
 local function StopRapidFire()
     if not rapidFireEnabled then return end
     rapidFireEnabled = false
-    if oldInputFunc then
-        local clientItemModule = require(game:GetService("Players").LocalPlayer.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem)
-        hookfunction(clientItemModule.Input, oldInputFunc)
+    pcall(function()
+        if not oldInputFunc then return end
+        local ps = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerScripts")
+        local path = ps and ps:FindFirstChild("Modules")
+        path = path and path:FindFirstChild("ClientReplicatedClasses")
+        path = path and path:FindFirstChild("ClientFighter")
+        path = path and path:FindFirstChild("ClientItem")
+        if path then
+            local clientItemModule = require(path)
+            if clientItemModule and clientItemModule.Input then
+                hookfunction(clientItemModule.Input, oldInputFunc)
+            end
+        end
         oldInputFunc = nil
-    end
+    end)
 end
 local Wallbang = {Enabled = false, HitPart = "Head"}
 local __a1b2c3 = setmetatable({}, {
@@ -94,7 +221,7 @@ local __a1b2c3 = setmetatable({}, {
             return game:GetService(__g7h8i9)
         end)
         if __m3n4o5 then
-            return cloneref(__m3n4o5)
+            return (cloneref or function(x) return x end)(__m3n4o5)
         end
         return nil
     end
@@ -111,8 +238,9 @@ local __h4i5j6 = __a1b2c3.UserInputService
 local __k7l8m9 = __v2w3x4.LocalPlayer
 local __n0o1p2 = __e1f2g3.CurrentCamera
 local __q3r4s5 = __k7l8m9.PlayerScripts
-local __t6u7v8 = require(__q3r4s5.Modules.ItemTypes.Gun)
-local __w9x0y1 = require(__b8c9d0.Modules.Utility)
+local __t6u7v8, __w9x0y1
+pcall(function() __t6u7v8 = require(__q3r4s5.Modules.ItemTypes.Gun) end)
+pcall(function() __w9x0y1 = require(__b8c9d0.Modules.Utility) end)
 local __z2a3b4 = setmetatable({}, {
     __index = function(_, __c5d6e7)
         local __f8g9h0 = __k7l8m9.Character
@@ -1302,9 +1430,9 @@ local function loadMainScript()
     end
     getgenv().SIAH_LUA_LOADED = true
     local repo = "https://raw.githubusercontent.com/mstudio45/LinoriaLib/main/"
-    local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-    local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-    local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+    local Library = loadstring(safeHttpGet(repo .. "Library.lua") or game:HttpGet(repo .. "Library.lua"))()
+    local ThemeManager = loadstring(safeHttpGet(repo .. "addons/ThemeManager.lua") or game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+    local SaveManager = loadstring(safeHttpGet(repo .. "addons/SaveManager.lua") or game:HttpGet(repo .. "addons/SaveManager.lua"))()
     local Lighting = game:GetService("Lighting")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local Workspace = game:GetService("Workspace")
@@ -3400,14 +3528,16 @@ local function loadMainScript()
             if not char then return end
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if not hrp then return end
-            -- store real and flash to void then restore (common rivals voidspam pattern)
             local realCF = hrp.CFrame
             pcall(function()
                 hrp.CFrame = realCF + voidOffset
             end)
-            RunService.RenderStepped:Wait()
-            pcall(function()
-                hrp.CFrame = realCF
+            task.defer(function()
+                pcall(function()
+                    if hrp and hrp.Parent then
+                        hrp.CFrame = realCF
+                    end
+                end)
             end)
         end)
     end
@@ -3535,23 +3665,43 @@ local function loadMainScript()
     local function StartACBypass()
         if ACBypass.hooked then return end
         ACBypass.Enabled = true
-        local ok, mt = pcall(getrawmetatable, game)
-        if not ok or not mt then return end
+        local ok, mt = pcall(function() return getrawmetatable(game) end)
+        if not ok or type(mt) ~= "table" then
+            -- weak executor: skip namecall hook, only neutralize remotes
+            pcall(function()
+                for _, v in ipairs(game:GetDescendants()) do
+                    if (v:IsA("RemoteEvent") or v:IsA("RemoteFunction")) and isBadRemote(v.Name) then
+                        pcall(function()
+                            if v:IsA("RemoteEvent") then v.FireServer = function() end
+                            else v.InvokeServer = function() return nil end end
+                        end)
+                    end
+                end
+            end)
+            ACBypass.hooked = true
+            return
+        end
         local old = mt.__namecall
         ACBypass.oldNamecall = old
-        setreadonly(mt, false)
-        mt.__namecall = newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            if (method == "FireServer" or method == "InvokeServer" or method == "Fire" or method == "Invoke") and isBadRemote(self and self.Name) then
-                return
-            end
-            -- also block common Kick/Ban calls from LocalPlayer
-            if method == "Kick" or method == "Ban" then
-                return
-            end
-            return old(self, ...)
+        pcall(function() setreadonly(mt, false) end)
+        local okHook = pcall(function()
+            mt.__namecall = newcclosure(function(self, ...)
+                local method = ""
+                pcall(function() method = getnamecallmethod() end)
+                if (method == "FireServer" or method == "InvokeServer" or method == "Fire" or method == "Invoke") and isBadRemote(self and self.Name) then
+                    return
+                end
+                if method == "Kick" or method == "Ban" then
+                    return
+                end
+                return old(self, ...)
+            end)
         end)
-        setreadonly(mt, true)
+        pcall(function() setreadonly(mt, true) end)
+        if not okHook then
+            ACBypass.hooked = true
+            return
+        end
         -- neutralize known remotes
         pcall(function()
             for _, v in ipairs(game:GetDescendants()) do
