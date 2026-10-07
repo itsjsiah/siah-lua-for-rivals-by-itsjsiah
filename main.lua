@@ -1,18 +1,24 @@
--[[
+--[[
   siah lua for rivals by itsjsiah
   universal executor compat layer
 ]]
 
 -- safe env
 local function safe_getgenv()
-    local ok, g = pcall(function() return getgenv() end)
+    local ok, g = pcall(function()
+        if type(getgenv) == "function" then
+            return getgenv()
+        end
+    end)
     if ok and type(g) == "table" then return g end
-    local ok2, g2 = pcall(function() return _G end)
-    if ok2 and type(g2) == "table" then return g2 end
+    if type(_G) == "table" then return _G end
     return {}
 end
-getgenv = getgenv or safe_getgenv
 local GENV = safe_getgenv()
+-- do NOT overwrite global getgenv; use helper everywhere we need it
+local function GEnv()
+    return safe_getgenv()
+end
 
 -- prevent hard crash on missing UNC
 local function stub() end
@@ -226,7 +232,7 @@ local __a1b2c3 = setmetatable({}, {
         return nil
     end
 })
-local __p6q7r8 = getgenv()
+local __p6q7r8 = GEnv()
 if __p6q7r8.__s9t0u1 then
     __p6q7r8.__s9t0u1:Shutdown()
 end
@@ -340,6 +346,10 @@ do
             if not self.__active then return end
             self.__target = self:__find()
         end)
+        if not __t6u7v8 or not __t6u7v8.StartShooting then
+            self:__startAutoShoot()
+            return
+        end
         local __l4m5n6 = __t6u7v8.StartShooting
         self.__oldfunc = __l4m5n6
         __t6u7v8.StartShooting = function(__o7p8q9, ...)
@@ -369,17 +379,19 @@ do
             local TargetPos = TargetPart.Position
             local TargetCF  = TargetPart.CFrame
             local OriginPos = TargetPos - Vector3.new(0, 3, 0)
-            __u3v4w5[utf8.char(0)] = __w9x0y1:EncodeCFrame(CFrame.new(OriginPos, TargetPos))
-            __u3v4w5[utf8.char(1)] = __w9x0y1:EncodeCFrame(CFrame.new(TargetPos))
-            __u3v4w5[utf8.char(2)] = TargetPart
-            local RandomOffset = TargetCF:ToObjectSpace(
-                CFrame.new(TargetPos + Vector3.new(
-                    math.random(-1, 1) * 0.5,
-                    math.random(-1, 1) * 0.5,
-                    math.random(-1, 1) * 0.5
-                ))
-            )
-            __u3v4w5[utf8.char(3)] = __w9x0y1:EncodeCFrame(RandomOffset)
+            if __w9x0y1 and __w9x0y1.EncodeCFrame then
+                __u3v4w5[utf8.char(0)] = __w9x0y1:EncodeCFrame(CFrame.new(OriginPos, TargetPos))
+                __u3v4w5[utf8.char(1)] = __w9x0y1:EncodeCFrame(CFrame.new(TargetPos))
+                __u3v4w5[utf8.char(2)] = TargetPart
+                local RandomOffset = TargetCF:ToObjectSpace(
+                    CFrame.new(TargetPos + Vector3.new(
+                        math.random(-1, 1) * 0.5,
+                        math.random(-1, 1) * 0.5,
+                        math.random(-1, 1) * 0.5
+                    ))
+                )
+                __u3v4w5[utf8.char(3)] = __w9x0y1:EncodeCFrame(RandomOffset)
+            end
             if __u3v4w5.Hitbox then
                 __u3v4w5.Hitbox = Wallbang.HitPart == "Head" and "Head" or "Body"
             end
@@ -436,7 +448,7 @@ do
         if self.__conn1 then self.__conn1:Disconnect() end
         if self.__conn2 then self.__conn2:Disconnect() end
         if self.__task1 then task.cancel(self.__task1) end
-        if self.__oldfunc then
+        if self.__oldfunc and __t6u7v8 then
             __t6u7v8.StartShooting = self.__oldfunc
         end
     end
@@ -1425,14 +1437,38 @@ local function setupCleanupAll(ctx)
     end
 end
 local function loadMainScript()
-    if getgenv().SIAH_LUA_LOADED then
+    -- allow re-exec if previous run crashed mid-load
+    if GEnv().SIAH_LUA_LOADED == true and GEnv().SIAH_LUA_UI then
         return
     end
-    getgenv().SIAH_LUA_LOADED = true
+    GEnv().SIAH_LUA_LOADED = true
     local repo = "https://raw.githubusercontent.com/mstudio45/LinoriaLib/main/"
-    local Library = loadstring(safeHttpGet(repo .. "Library.lua") or game:HttpGet(repo .. "Library.lua"))()
-    local ThemeManager = loadstring(safeHttpGet(repo .. "addons/ThemeManager.lua") or game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-    local SaveManager = loadstring(safeHttpGet(repo .. "addons/SaveManager.lua") or game:HttpGet(repo .. "addons/SaveManager.lua"))()
+    local function loadLib(path)
+        local src = safeHttpGet(repo .. path)
+        if not src or src == "" then
+            local ok, res = pcall(function() return game:HttpGet(repo .. path) end)
+            if ok then src = res end
+        end
+        assert(src and src ~= "", "failed to download " .. path)
+        local fn, err = loadstring(src)
+        assert(fn, "loadstring failed for " .. path .. ": " .. tostring(err))
+        local ok2, lib = pcall(fn)
+        assert(ok2 and lib, "exec failed for " .. path .. ": " .. tostring(lib))
+        return lib
+    end
+    local Library, ThemeManager, SaveManager
+    local okL, errL = pcall(function()
+        Library = loadLib("Library.lua")
+        ThemeManager = loadLib("addons/ThemeManager.lua")
+        SaveManager = loadLib("addons/SaveManager.lua")
+    end)
+    if not okL then
+        GEnv().SIAH_LUA_LOADED = false
+        GEnv().SIAH_LUA_UI = false
+        warn("[siah] library load failed: ", errL)
+        return
+    end
+    GEnv().SIAH_LUA_UI = true
     local Lighting = game:GetService("Lighting")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local Workspace = game:GetService("Workspace")
@@ -3306,7 +3342,7 @@ local function loadMainScript()
         pcall(function()
             if identifyexecutor then
                 -- some executors expose it globally under different names
-                local env = getgenv()
+                local env = GEnv()
                 if env.queue_on_teleport then env.queue_on_teleport(code) ok = true end
             end
         end)
@@ -3314,14 +3350,14 @@ local function loadMainScript()
     end
 
     local function applyAutoLoad(on)
-        getgenv().SIAH_AUTOLOAD = on and true or false
+        GEnv().SIAH_AUTOLOAD = on and true or false
         pcall(function()
             if on then
                 writefile(AUTOLOAD_FLAG, "1")
                 queueScript()
             else
                 if isfile(AUTOLOAD_FLAG) then delfile(AUTOLOAD_FLAG) end
-                getgenv().SIAH_AUTOLOAD = false
+                GEnv().SIAH_AUTOLOAD = false
             end
         end)
     end
@@ -3341,12 +3377,12 @@ local function loadMainScript()
     pcall(function()
         local TeleportService = game:GetService("TeleportService")
         TeleportService.TeleportInitFailed:Connect(function()
-            if getgenv().SIAH_AUTOLOAD then queueScript() end
+            if GEnv().SIAH_AUTOLOAD then queueScript() end
         end)
         -- LocalPlayer OnTeleport (fires on client when teleport starts)
         if lp.OnTeleport then
             lp.OnTeleport:Connect(function(State)
-                if getgenv().SIAH_AUTOLOAD then
+                if GEnv().SIAH_AUTOLOAD then
                     queueScript()
                 end
             end)
@@ -3356,7 +3392,7 @@ local function loadMainScript()
     -- also re-queue on game:BindToClose / when leaving
     pcall(function()
         game:BindToClose(function()
-            if getgenv().SIAH_AUTOLOAD then
+            if GEnv().SIAH_AUTOLOAD then
                 queueScript()
             end
         end)
@@ -3366,7 +3402,7 @@ local function loadMainScript()
     task.spawn(function()
         while true do
             task.wait(8)
-            if getgenv().SIAH_AUTOLOAD then
+            if GEnv().SIAH_AUTOLOAD then
                 queueScript()
             end
         end
@@ -3640,7 +3676,8 @@ local function loadMainScript()
         end
     end)
     Library:OnUnload(function()
-        getgenv().SIAH_LUA_LOADED = false
+        GEnv().SIAH_LUA_LOADED = false
+        GEnv().SIAH_LUA_UI = false
         WatermarkConnection:Disconnect()
         cleanupAll()
         print("siah lua for rivals by itsjsiah Unloaded!")
@@ -3873,4 +3910,7 @@ local function loadMainScript()
 
     print("siah lua for rivals by itsjsiah Loaded successfully!")
 end
-loadMainScript()
+
+pcall(function()
+    loadMainScript()
+end)
