@@ -3315,93 +3315,93 @@ local function loadMainScript()
     })
 
 
-    -- ========== AUTO LOAD (hard) ==========
+
+
+    -- ========== AUTO LOAD (queue_on_teleport) ==========
+    -- This is the same method other scripts use for server hop / place teleport.
+    -- It does NOT need autoexec. It DOES need your executor to support queue_on_teleport.
     local SIAH_URL = "https://raw.githubusercontent.com/itsjsiah/siah-lua-for-rivals-by-itsjsiah/refs/heads/main/main.lua"
-    local SIAH_LOADSTRING = 'loadstring(game:HttpGet("' .. SIAH_URL .. '"))()'
+    local SIAH_CODE = 'getgenv().SIAH_LUA_LOADED=false;getgenv().SIAH_LUA_UI=false;loadstring(game:HttpGet("' .. SIAH_URL .. '"))()'
     local AUTOLOAD_FLAG = "siah_rivals_autoload.txt"
 
-    local function queueScript()
-        local code = SIAH_LOADSTRING
-        local ok = false
-        -- every known queue API
+    local function getQueueFuncs()
+        local list = {}
+        local function add(fn)
+            if type(fn) == "function" then table.insert(list, fn) end
+        end
+        pcall(function() add(queue_on_teleport) end)
+        pcall(function() add(queueonteleport) end)
+        pcall(function() if syn then add(syn.queue_on_teleport) end end)
+        pcall(function() if fluxus then add(fluxus.queue_on_teleport) end end)
         pcall(function()
-            if syn and syn.queue_on_teleport then syn.queue_on_teleport(code) ok = true end
+            local g = GEnv()
+            add(g.queue_on_teleport)
+            add(g.queueonteleport)
+            if g.syn then add(g.syn.queue_on_teleport) end
+            if g.fluxus then add(g.fluxus.queue_on_teleport) end
         end)
-        pcall(function()
-            if queue_on_teleport then queue_on_teleport(code) ok = true end
-        end)
-        pcall(function()
-            if queueonteleport then queueonteleport(code) ok = true end
-        end)
-        pcall(function()
-            if fluxus and fluxus.queue_on_teleport then fluxus.queue_on_teleport(code) ok = true end
-        end)
-        pcall(function()
-            if KRNL_LOADED and queue_on_teleport then queue_on_teleport(code) ok = true end
-        end)
-        pcall(function()
-            if identifyexecutor then
-                -- some executors expose it globally under different names
-                local env = GEnv()
-                if env.queue_on_teleport then env.queue_on_teleport(code) ok = true end
-            end
-        end)
-        return ok
+        return list
     end
 
-    local function applyAutoLoad(on)
+    local function queueScript()
+        local funcs = getQueueFuncs()
+        if #funcs == 0 then return false, "no queue_on_teleport on this executor" end
+        local any = false
+        for _, fn in ipairs(funcs) do
+            local ok = pcall(fn, SIAH_CODE)
+            if ok then any = true end
+        end
+        return any, any and "queued" or "queue call failed"
+    end
+
+    local function setAutoLoad(on)
         GEnv().SIAH_AUTOLOAD = on and true or false
         pcall(function()
             if on then
                 writefile(AUTOLOAD_FLAG, "1")
-                queueScript()
             else
                 if isfile(AUTOLOAD_FLAG) then delfile(AUTOLOAD_FLAG) end
-                GEnv().SIAH_AUTOLOAD = false
             end
         end)
+        if on then
+            return queueScript()
+        end
+        return true, "off"
     end
 
-    -- restore + re-queue every time script runs if flag exists
+    -- restore flag
     local autoloadWanted = false
     pcall(function()
-        if isfile(AUTOLOAD_FLAG) and readfile(AUTOLOAD_FLAG) == "1" then
+        if isfile(AUTOLOAD_FLAG) and tostring(readfile(AUTOLOAD_FLAG)):find("1") then
             autoloadWanted = true
         end
     end)
+
+    -- ALWAYS re-queue when script loads if enabled (critical for hop chains)
     if autoloadWanted then
-        applyAutoLoad(true)
+        setAutoLoad(true)
     end
 
-    -- TeleportService: re-queue right before leaving (most reliable for server hops)
+    -- re-queue right before teleport (most important)
     pcall(function()
-        local TeleportService = game:GetService("TeleportService")
-        TeleportService.TeleportInitFailed:Connect(function()
-            if GEnv().SIAH_AUTOLOAD then queueScript() end
-        end)
-        -- LocalPlayer OnTeleport (fires on client when teleport starts)
         if lp.OnTeleport then
-            lp.OnTeleport:Connect(function(State)
+            lp.OnTeleport:Connect(function()
                 if GEnv().SIAH_AUTOLOAD then
                     queueScript()
                 end
             end)
         end
     end)
-
-    -- also re-queue on game:BindToClose / when leaving
     pcall(function()
-        game:BindToClose(function()
-            if GEnv().SIAH_AUTOLOAD then
-                queueScript()
-            end
+        game:GetService("TeleportService").TeleportInitFailed:Connect(function()
+            if GEnv().SIAH_AUTOLOAD then queueScript() end
         end)
     end)
 
-    -- periodic re-queue while enabled (some executors drop the queue)
+    -- keep queue alive (some executors only keep last queue)
     task.spawn(function()
         while true do
-            task.wait(8)
+            task.wait(5)
             if GEnv().SIAH_AUTOLOAD then
                 queueScript()
             end
@@ -3412,17 +3412,35 @@ local function loadMainScript()
         Text = "Auto Load Script",
         Default = autoloadWanted,
         Callback = function(Value)
-            applyAutoLoad(Value)
+            local ok, msg = setAutoLoad(Value)
             if Value then
-                local queued = queueScript()
-                Library:Notify(queued and "Auto Load ON (queued)" or "Auto Load ON — put loadstring in autoexec for cold start", 4)
+                if ok then
+                    Library:Notify("Auto Load ON — will run after server hop / teleport", 4)
+                else
+                    Library:Notify("Auto Load: " .. tostring(msg), 5)
+                end
             else
                 Library:Notify("Auto Load OFF", 2)
             end
         end
     })
-    MiscGroup3:AddLabel("server hop / teleport: auto")
-    MiscGroup3:AddLabel("full restart: use autoexec")
+    MiscGroup3:AddLabel("needs queue_on_teleport")
+    MiscGroup3:AddLabel("test: hop servers with it ON")
+
+    MiscGroup3:AddButton({
+        Text = "Copy Autoexec Line",
+        Func = function()
+            local line = SIAH_CODE
+            pcall(function()
+                if setclipboard then setclipboard(line)
+                elseif toclipboard then toclipboard(line)
+                elseif syn and syn.write_clipboard then syn.write_clipboard(line)
+                end
+            end)
+            writeAutoexecHelper()
+            Library:Notify("copied loadstring + wrote siah_autoexec_helper.lua", 4)
+        end
+    })
 
     MiscGroup3:AddButton({
         Text = "Unload",
@@ -3551,38 +3569,76 @@ local function loadMainScript()
         end
     end
 
-    -- Void Spam (anti-hit style)
-    local voidEnabled = false
-    local voidConn = nil
-    local voidOffset = Vector3.new(0, -500, 0)
-    local function startVoidSpam()
-        if voidConn then return end
-        voidEnabled = true
-        voidConn = RunService.Heartbeat:Connect(function()
-            if not voidEnabled then return end
-            local char = lp.Character
-            if not char then return end
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp then return end
-            local realCF = hrp.CFrame
-            pcall(function()
-                hrp.CFrame = realCF + voidOffset
-            end)
-            task.defer(function()
-                pcall(function()
-                    if hrp and hrp.Parent then
-                        hrp.CFrame = realCF
-                    end
-                end)
-            end)
-        end)
+
+    -- Void Spam (working rivals-style desync)
+    local VoidState = {
+        enabled = false,
+        hbConn = nil,
+        rsBound = false,
+        clientCF = CFrame.identity,
+        depth = 750,
+    }
+    local function vsGetHRP()
+        local c = lp.Character
+        return c and c:FindFirstChild("HumanoidRootPart")
     end
     local function stopVoidSpam()
-        voidEnabled = false
-        if voidConn then
-            voidConn:Disconnect()
-            voidConn = nil
+        VoidState.enabled = false
+        if VoidState.hbConn then
+            VoidState.hbConn:Disconnect()
+            VoidState.hbConn = nil
         end
+        pcall(function()
+            RunService:UnbindFromRenderStep("SiahVoidRestore")
+        end)
+        VoidState.rsBound = false
+        local hrp = vsGetHRP()
+        if hrp then
+            pcall(function()
+                hrp.CFrame = VoidState.clientCF
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+            end)
+        end
+    end
+    local function startVoidSpam()
+        stopVoidSpam()
+        VoidState.enabled = true
+        -- restore client view every render so YOU don't see the void
+        pcall(function()
+            RunService:BindToRenderStep("SiahVoidRestore", Enum.RenderPriority.Camera.Value + 1, function()
+                if not VoidState.enabled then return end
+                local hrp = vsGetHRP()
+                if hrp and VoidState.clientCF then
+                    pcall(function()
+                        hrp.CFrame = VoidState.clientCF
+                    end)
+                end
+            end)
+            VoidState.rsBound = true
+        end)
+        -- send void CFrame to server on heartbeat
+        VoidState.hbConn = RunService.Heartbeat:Connect(function()
+            if not VoidState.enabled then return end
+            local hrp = vsGetHRP()
+            if not hrp then return end
+            -- save real client pose first
+            VoidState.clientCF = hrp.CFrame
+            local d = VoidState.depth or 750
+            local voidCF = CFrame.new(
+                (math.random() - 0.5) * d * 2,
+                -math.abs(d) - math.random(50, 200),
+                (math.random() - 0.5) * d * 2
+            ) * CFrame.Angles(math.pi, math.random() * math.pi, math.pi)
+            pcall(function()
+                hrp.CFrame = voidCF
+                hrp.AssemblyLinearVelocity = Vector3.new(
+                    (math.random() - 0.5) * 400,
+                    (math.random() - 0.5) * 400,
+                    (math.random() - 0.5) * 400
+                )
+            end)
+        end)
     end
     local RageVoid = Tabs.Rage:AddRightGroupbox("Void")
     RageVoid:AddToggle("VOID_SPAM", {
@@ -3594,12 +3650,12 @@ local function loadMainScript()
     })
     RageVoid:AddSlider("VOID_DEPTH", {
         Text = "Void Depth",
-        Default = 500,
+        Default = 750,
         Min = 100,
-        Max = 2000,
+        Max = 2500,
         Rounding = 0,
         Callback = function(Value)
-            voidOffset = Vector3.new(0, -Value, 0)
+            VoidState.depth = Value
         end
     })
 
