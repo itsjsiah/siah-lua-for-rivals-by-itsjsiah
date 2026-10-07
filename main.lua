@@ -3146,25 +3146,53 @@ local function loadMainScript()
         end
     })
 
+    local SIAH_LOADSTRING = [[loadstring(game:HttpGet("https://raw.githubusercontent.com/itsjsiah/siah-lua-for-rivals-by-itsjsiah/refs/heads/main/main.lua"))()]]
+    local function applyAutoLoad(on)
+        getgenv().SIAH_AUTOLOAD = on and true or false
+        pcall(function()
+            if on then
+                writefile("siah_rivals_autoload.txt", "1")
+                -- queue for teleport / server hop / rejoin same session chain
+                if syn and syn.queue_on_teleport then
+                    syn.queue_on_teleport(SIAH_LOADSTRING)
+                elseif queue_on_teleport then
+                    queue_on_teleport(SIAH_LOADSTRING)
+                elseif queueonteleport then
+                    queueonteleport(SIAH_LOADSTRING)
+                end
+            else
+                if isfile("siah_rivals_autoload.txt") then delfile("siah_rivals_autoload.txt") end
+                -- clear queue if supported (most executors only clear by not re-queuing)
+                if syn and syn.queue_on_teleport then
+                    syn.queue_on_teleport("")
+                elseif queue_on_teleport then
+                    queue_on_teleport("")
+                end
+            end
+        end)
+    end
+    -- restore previous preference
+    local autoloadWanted = false
+    pcall(function()
+        if isfile("siah_rivals_autoload.txt") then
+            autoloadWanted = true
+            applyAutoLoad(true)
+        end
+    end)
     MiscGroup3:AddToggle("SCRIPT_AUTOLOAD", {
         Text = "Auto Load Script",
-        Default = false,
+        Default = autoloadWanted,
         Callback = function(Value)
-            getgenv().SIAH_AUTOLOAD = Value
+            applyAutoLoad(Value)
             if Value then
-                pcall(function()
-                    writefile("siah_rivals_autoload.txt", "1")
-                end)
-                Library:Notify("Auto Load ON - put this script in your executor autoexec folder too", 4)
+                Library:Notify("Auto Load ON — will re-run after teleport/server hop", 4)
             else
-                pcall(function()
-                    if isfile("siah_rivals_autoload.txt") then delfile("siah_rivals_autoload.txt") end
-                end)
                 Library:Notify("Auto Load OFF", 2)
             end
         end
     })
-    MiscGroup3:AddLabel("also put script in autoexec")
+    MiscGroup3:AddLabel("uses queue_on_teleport")
+    MiscGroup3:AddLabel("for full cold-start put in autoexec")
 
     MiscGroup3:AddButton({
         Text = "Unload",
@@ -3503,16 +3531,32 @@ local function loadMainScript()
     SaveManager:SetLibrary(Library)
     SaveManager:IgnoreThemeSettings()
     SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-    local configRoot = "siah_rivals/" .. (lp.Name or "unknown")
+    -- Config: stable per-account folder (UserId), shared across places/servers
+    local uid = tostring(lp.UserId or "0")
+    local configRoot = "siah_rivals/" .. uid
     ThemeManager:SetFolder(configRoot)
     SaveManager:SetFolder(configRoot)
-    SaveManager:SetSubFolder(tostring(game.PlaceId))
+    -- NO SetSubFolder — configs stay the same when you hop servers / places
     SaveManager:IgnoreThemeSettings()
-    SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+    SaveManager:SetIgnoreIndexes({ "MenuKeybind", "SCRIPT_AUTOLOAD" })
+    -- ensure folders exist (some executors need explicit makefolder)
+    pcall(function()
+        if makefolder then
+            if not isfolder("siah_rivals") then makefolder("siah_rivals") end
+            if not isfolder(configRoot) then makefolder(configRoot) end
+            if not isfolder(configRoot .. "/settings") then makefolder(configRoot .. "/settings") end
+            if not isfolder(configRoot .. "/themes") then makefolder(configRoot .. "/themes") end
+        end
+    end)
     SaveManager:BuildConfigSection(Tabs["UI Settings"])
     ThemeManager:ApplyToTab(Tabs["UI Settings"])
-    -- autoload config if set
-    pcall(function() SaveManager:LoadAutoloadConfig() end)
+    -- load autoload config AFTER ui is fully built
+    task.defer(function()
+        task.wait(0.35)
+        pcall(function()
+            SaveManager:LoadAutoloadConfig()
+        end)
+    end)
 
 
     -- Floating draggable hide button
