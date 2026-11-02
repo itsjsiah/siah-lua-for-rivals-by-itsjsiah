@@ -1,5 +1,5 @@
 --[[
-  siah lua for rivals by itsjsiah
+  siah lua v2 by itsjsiah
   universal executor compat layer
 ]]
 
@@ -1480,7 +1480,7 @@ local function loadMainScript()
     Library.ShowCustomCursor = true
     Library.NotifySide = "Left"
     local Window = Library:CreateWindow({
-        Title = "siah lua for rivals by itsjsiah",
+        Title = "siah lua v2 by itsjsiah",
         Center = true,
         AutoShow = true,
         Resizable = true,
@@ -1498,6 +1498,8 @@ local function loadMainScript()
         Misc = Window:AddTab("Misc"),
         ["UI Settings"] = Window:AddTab("UI Settings"),
         Rage = Window:AddTab("Rage"),
+        Extras = Window:AddTab("Extras"),
+        Config = Window:AddTab("Config"),
     }
     SETTINGS = {
         ENABLE_AIMBOT = false, AIMBOT_MODE = "Smooth", SMOOTHNESS = 0.3,
@@ -3415,7 +3417,7 @@ local function loadMainScript()
             local ok, msg = setAutoLoad(Value)
             if Value then
                 if ok then
-                    Library:Notify("Auto Load ON — will run after server hop / teleport", 4)
+                    Library:Notify("Auto Load ON â€” will run after server hop / teleport", 4)
                 else
                     Library:Notify("Auto Load: " .. tostring(msg), 5)
                 end
@@ -3726,9 +3728,9 @@ local function loadMainScript()
             FrameCounter = 0
         end
         if CanDoPing then
-            Library:SetWatermark(("siah lua for rivals by itsjsiah | %d fps | %d ms"):format(math.floor(FPS), GetPing()))
+            Library:SetWatermark(("siah lua v2 by itsjsiah | %d fps | %d ms"):format(math.floor(FPS), GetPing()))
         else
-            Library:SetWatermark(("siah lua for rivals by itsjsiah | %d fps"):format(math.floor(FPS)))
+            Library:SetWatermark(("siah lua v2 by itsjsiah | %d fps"):format(math.floor(FPS)))
         end
     end)
     Library:OnUnload(function()
@@ -3736,7 +3738,7 @@ local function loadMainScript()
         GEnv().SIAH_LUA_UI = false
         WatermarkConnection:Disconnect()
         cleanupAll()
-        print("siah lua for rivals by itsjsiah Unloaded!")
+        print("siah lua v2 by itsjsiah Unloaded!")
         Library.Unloaded = true
     end)
 
@@ -3846,7 +3848,7 @@ local function loadMainScript()
     local configRoot = "siah_rivals/" .. uid
     ThemeManager:SetFolder(configRoot)
     SaveManager:SetFolder(configRoot)
-    -- NO SetSubFolder — configs stay the same when you hop servers / places
+    -- NO SetSubFolder â€” configs stay the same when you hop servers / places
     SaveManager:IgnoreThemeSettings()
     SaveManager:SetIgnoreIndexes({ "MenuKeybind", "SCRIPT_AUTOLOAD" })
     -- ensure folders exist (some executors need explicit makefolder)
@@ -3953,10 +3955,10 @@ local function loadMainScript()
         end)
         if visible then
             btn.Text = "HIDE UI"
-            btn.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+            btn.BackgroundColor3 = Color3.fromRGB(26, 22, 38)
         else
             btn.Text = "SHOW UI"
-            btn.BackgroundColor3 = Color3.fromRGB(45, 22, 22)
+            btn.BackgroundColor3 = Color3.fromRGB(74, 40, 116)
         end
     end)
 
@@ -3964,7 +3966,2176 @@ local function loadMainScript()
         pcall(function() hideGui:Destroy() end)
     end)
 
-    print("siah lua for rivals by itsjsiah Loaded successfully!")
+    local function isEnemy(plr)
+        if plr == lp then return false end
+        local a, b = plr:GetAttribute("TeamID"), lp:GetAttribute("TeamID")
+        if a ~= nil and b ~= nil then return a ~= b end
+        return true
+    end
+    local WeatherGroup
+
+    ;(function()
+    -- ============================================================
+    --  siah lua v2 by itsjsiah â€” weather + movement plus
+    -- ============================================================
+    local WeatherState = { mode = "None", intensity = 1, lightning = false, thunderId = "", folder = nil, conns = {} }
+    local function weatherCleanup()
+        for _, c in ipairs(WeatherState.conns) do pcall(function() c:Disconnect() end) end
+        table.clear(WeatherState.conns)
+        if WeatherState.folder then pcall(function() WeatherState.folder:Destroy() end) WeatherState.folder = nil end
+        WeatherState.mode = "None"
+    end
+    local function weatherFolder()
+        if WeatherState.folder and WeatherState.folder.Parent then return WeatherState.folder end
+        local f = Instance.new("Folder")
+        f.Name = "SiahWeather"
+        f.Parent = workspace
+        WeatherState.folder = f
+        return f
+    end
+    local function weatherAnchor()
+        local existing = weatherFolder():FindFirstChild("Anchor")
+        if existing then return existing end
+        local p = Instance.new("Part")
+        p.Name = "Anchor"
+        p.Anchored = true
+        p.CanCollide = false
+        p.CanQuery = false
+        p.Transparency = 1
+        p.Size = Vector3.new(2, 2, 2)
+        p.Parent = weatherFolder()
+        table.insert(WeatherState.conns, RunService.RenderStepped:Connect(function()
+            if p.Parent then
+                p.CFrame = CFrame.new(cam.CFrame.Position + Vector3.new(0, 65, 0))
+            end
+        end))
+        return p
+    end
+    local function newEmitter(cfg)
+        local e = Instance.new("ParticleEmitter")
+        e.Texture = cfg.Texture
+        e.Rate = cfg.Rate or 0
+        e.Lifetime = NumberRange.new(cfg.LifeMin or 1, cfg.LifeMax or 2)
+        e.Speed = NumberRange.new(cfg.SpeedMin or 5, cfg.SpeedMax or 10)
+        e.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, cfg.SizeStart or 0.2),
+            NumberSequenceKeypoint.new(1, cfg.SizeEnd or 0.1),
+        })
+        e.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, cfg.TransStart or 0.2),
+            NumberSequenceKeypoint.new(0.7, cfg.TransMax or 0.4),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        e.Acceleration = Vector3.new(0, cfg.AccelY or -10, 0)
+        e.SpreadAngle = Vector2.new(cfg.Spread or 10, cfg.Spread or 10)
+        e.EmissionDirection = Enum.NormalId.Down
+        e.Rotation = NumberRange.new(cfg.RotMin or 0, cfg.RotMax or 360)
+        e.RotSpeed = NumberRange.new(cfg.RotSpeedMin or -30, cfg.RotSpeedMax or 30)
+        e.Color = ColorSequence.new(cfg.Color or Color3.new(1, 1, 1))
+        if cfg.Orientation then e.Orientation = cfg.Orientation end
+        if cfg.Enabled == false then e.Enabled = false end
+        return e
+    end
+    local SOFT = "rbxasset://textures/particles/smoke_main.dds"
+    local SPARKLE = "rbxasset://textures/particles/sparkles_main.dds"
+    local function startRain()
+        local anchor = weatherAnchor()
+        local e1 = newEmitter({
+            Texture = SOFT, Rate = math.floor(520 * WeatherState.intensity),
+            LifeMin = 1.2, LifeMax = 1.8, SpeedMin = 70, SpeedMax = 90,
+            SizeStart = 0.12, SizeEnd = 0.1, AccelY = -45, Spread = 4,
+            RotMin = 0, RotMax = 0, RotSpeedMin = 0, RotSpeedMax = 0,
+            Color = Color3.fromRGB(170, 190, 220), TransMax = 0.35,
+            Orientation = Enum.ParticleOrientation.VelocityParallel,
+        })
+        e1.Parent = anchor
+        local e2 = newEmitter({
+            Texture = SOFT, Rate = math.floor(60 * WeatherState.intensity),
+            LifeMin = 1, LifeMax = 1.4, SpeedMin = 55, SpeedMax = 70,
+            SizeStart = 0.3, SizeEnd = 0.25, AccelY = -35, Spread = 6,
+            Color = Color3.fromRGB(150, 170, 200), TransMax = 0.6,
+        })
+        e2.Parent = anchor
+    end
+    local function startSnow()
+        local anchor = weatherAnchor()
+        local e1 = newEmitter({
+            Texture = SOFT, Rate = math.floor(220 * WeatherState.intensity),
+            LifeMin = 6, LifeMax = 9, SpeedMin = 6, SpeedMax = 10,
+            SizeStart = 0.35, SizeEnd = 0.25, AccelY = -1.5, Spread = 18,
+            Color = Color3.new(1, 1, 1), TransMax = 0.15,
+        })
+        e1.Parent = anchor
+        local e2 = newEmitter({
+            Texture = SPARKLE, Rate = math.floor(60 * WeatherState.intensity),
+            LifeMin = 6, LifeMax = 9, SpeedMin = 5, SpeedMax = 8,
+            SizeStart = 0.2, SizeEnd = 0.15, AccelY = -0.8, Spread = 22,
+            Color = Color3.new(1, 1, 1), TransMax = 0.35,
+        })
+        e2.Parent = anchor
+    end
+    local function startBlizzard()
+        local anchor = weatherAnchor()
+        local e1 = newEmitter({
+            Texture = SOFT, Rate = math.floor(700 * WeatherState.intensity),
+            LifeMin = 3, LifeMax = 5, SpeedMin = 18, SpeedMax = 28,
+            SizeStart = 0.3, SizeEnd = 0.2, AccelY = -6, Spread = 40,
+            Color = Color3.new(1, 1, 1), TransMax = 0.1,
+        })
+        e1.Parent = anchor
+        local e2 = newEmitter({
+            Texture = SOFT, Rate = math.floor(130 * WeatherState.intensity),
+            LifeMin = 3, LifeMax = 5, SpeedMin = 14, SpeedMax = 22,
+            SizeStart = 3, SizeEnd = 5, AccelY = -2, Spread = 55,
+            Color = Color3.new(1, 1, 1), TransMax = 0.75,
+        })
+        e2.Parent = anchor
+    end
+    local function startFog()
+        table.insert(WeatherState.conns, RunService.RenderStepped:Connect(function()
+            if WeatherState.mode ~= "Fog" then return end
+            cam.FogEnd = 400
+            cam.FogStart = 0
+            Lighting.FogColor = Color3.fromRGB(150, 155, 165)
+        end))
+    end
+    local lightningThread = nil
+    local function stopLightning()
+        WeatherState.lightning = false
+        if lightningThread then pcall(task.cancel, lightningThread) lightningThread = nil end
+    end
+    local function startLightning()
+        if WeatherState.mode ~= "Rain" and WeatherState.mode ~= "Blizzard" then
+            Library:Notify("Lightning only runs during Rain or Blizzard", 3)
+            return
+        end
+        WeatherState.lightning = true
+        stopLightning()
+        WeatherState.lightning = true
+        lightningThread = task.spawn(function()
+            while WeatherState.lightning and WeatherState.mode ~= "None" do
+                task.wait(math.random(700, 2200) / 100)
+                if not WeatherState.lightning then break end
+                local flashes = math.random(1, 3)
+                for _ = 1, flashes do
+                    pcall(function() Lighting.Brightness = 3 end)
+                    task.wait(math.random(30, 70) / 1000)
+                    pcall(function() Lighting.Brightness = 1 end)
+                    task.wait(math.random(40, 110) / 1000)
+                end
+                if WeatherState.thunderId ~= "" then
+                    pcall(function()
+                        local s = Instance.new("Sound")
+                        s.SoundId = WeatherState.thunderId
+                        s.Volume = 0.6
+                        s.PlaybackSpeed = 0.85 + math.random() * 0.25
+                        s.Parent = workspace
+                        s:Play()
+                        s.Ended:Connect(function() s:Destroy() end)
+                        task.delay(12, function() if s.Parent then s:Destroy() end end)
+                    end)
+                end
+            end
+        end)
+    end
+    local function applyWeather(mode)
+        weatherCleanup()
+        stopLightning()
+        WeatherState.mode = mode
+        if mode == "Rain" then startRain()
+        elseif mode == "Snow" then startSnow()
+        elseif mode == "Blizzard" then startBlizzard()
+        elseif mode == "Fog" then startFog()
+        end
+        if WeatherState.lightning and (mode == "Rain" or mode == "Blizzard") then
+            WeatherState.lightning = false
+            startLightning()
+        end
+    end
+    WeatherGroup = Tabs.Extras:AddLeftGroupbox("Weather")
+    WeatherGroup:AddLabel("siah weather engine â€” v2")
+    WeatherGroup:AddDropdown("WEATHER_MODE", {
+        Text = "Preset",
+        Values = { "None", "Rain", "Snow", "Blizzard", "Fog" },
+        Default = "None",
+        Callback = function(Value) applyWeather(Value) end,
+    })
+    WeatherGroup:AddSlider("WEATHER_INTENSITY", {
+        Text = "Intensity",
+        Default = 1, Min = 0.2, Max = 3, Rounding = 1,
+        Callback = function(Value)
+            WeatherState.intensity = Value
+            if WeatherState.mode ~= "None" then applyWeather(WeatherState.mode) end
+        end,
+    })
+    WeatherGroup:AddToggle("WEATHER_LIGHTNING", {
+        Text = "Lightning",
+        Default = false,
+        Callback = function(Value)
+            if Value then startLightning() else stopLightning() end
+        end,
+    })
+    WeatherGroup:AddInput("WEATHER_THUNDER_ID", {
+        Text = "Thunder Sound ID",
+        Default = "",
+        Placeholder = "rbxassetid://...",
+        Callback = function(Value) WeatherState.thunderId = Value:gsub("%s+", "") end,
+    })
+    WeatherGroup:AddButton({
+        Text = "Clear Weather",
+        Func = function()
+            weatherCleanup()
+            stopLightning()
+            if Toggles["WEATHER_LIGHTNING"] then Toggles["WEATHER_LIGHTNING"]:SetValue(false) end
+            if Options["WEATHER_MODE"] then Options["WEATHER_MODE"]:SetValue("None") end
+            Library:Notify("Weather cleared", 2)
+        end,
+    })
+    WeatherGroup:AddDivider()
+    WeatherGroup:AddToggle("WEATHER_AUTO_SNOW", {
+        Text = "Snow During Winter (Dec/Jan)",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                local m = os.date("*t").month
+                if m == 12 or m == 1 then
+                    Options["WEATHER_MODE"]:SetValue("Snow")
+                else
+                    Library:Notify("Not winter â€” snow armed but not running", 3)
+                end
+            end
+        end,
+    })
+
+    -- ============================================================
+    --  movement plus
+    -- ============================================================
+    local speedConn, gravConn, fovConn, jumpConn
+    local MovePlus = Tabs.Extras:AddLeftGroupbox("Movement+")
+    MovePlus:AddSlider("MOVE_SPEED_VAL", {
+        Text = "Speed",
+        Default = 32, Min = 16, Max = 250, Rounding = 0,
+        Suffix = " ws",
+        Callback = function(Value)
+            if Toggles["MOVE_SPEED"] and Toggles["MOVE_SPEED"].Value then
+                local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+                if h then pcall(function() h.WalkSpeed = Value end) end
+            end
+        end,
+    })
+    MovePlus:AddToggle("MOVE_SPEED", {
+        Text = "Speed Boost",
+        Default = false,
+        Callback = function(Value)
+            if speedConn then speedConn:Disconnect() speedConn = nil end
+            local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+            if h then pcall(function() h.WalkSpeed = 16 end) end
+            if Value then
+                speedConn = RunService.Heartbeat:Connect(function()
+                    if not Toggles["MOVE_SPEED"].Value then return end
+                    local char = lp.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.WalkSpeed ~= Options["MOVE_SPEED_VAL"].Value then
+                        pcall(function() hum.WalkSpeed = Options["MOVE_SPEED_VAL"].Value end)
+                    end
+                end)
+            end
+        end,
+    })
+    MovePlus:AddSlider("MOVE_GRAVITY_VAL", {
+        Text = "Gravity",
+        Default = 196, Min = 0, Max = 400, Rounding = 0,
+        Callback = function(Value)
+            if Toggles["MOVE_GRAVITY"] and Toggles["MOVE_GRAVITY"].Value then
+                pcall(function() workspace.Gravity = Value end)
+            end
+        end,
+    })
+    MovePlus:AddToggle("MOVE_GRAVITY", {
+        Text = "Custom Gravity",
+        Default = false,
+        Callback = function(Value)
+            if gravConn then gravConn:Disconnect() gravConn = nil end
+            if Value then
+                gravConn = RunService.Heartbeat:Connect(function()
+                    if not Toggles["MOVE_GRAVITY"].Value then return end
+                    pcall(function() workspace.Gravity = Options["MOVE_GRAVITY_VAL"].Value end)
+                end)
+            else
+                pcall(function() workspace.Gravity = 196.2 end)
+            end
+        end,
+    })
+    MovePlus:AddSlider("MOVE_JUMP_VAL", {
+        Text = "Jump Power",
+        Default = 50, Min = 50, Max = 300, Rounding = 0,
+        Callback = function(Value)
+            if Toggles["MOVE_JUMP"] and Toggles["MOVE_JUMP"].Value then
+                local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+                if h then pcall(function() h.JumpPower = Value end) end
+            end
+        end,
+    })
+    MovePlus:AddToggle("MOVE_JUMP", {
+        Text = "High Jump",
+        Default = false,
+        Callback = function(Value)
+            if jumpConn then jumpConn:Disconnect() jumpConn = nil end
+            local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+            if h then pcall(function() h.JumpPower = 50 end) end
+            if Value then
+                jumpConn = RunService.Heartbeat:Connect(function()
+                    if not Toggles["MOVE_JUMP"].Value then return end
+                    local char = lp.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.JumpPower ~= Options["MOVE_JUMP_VAL"].Value then
+                        pcall(function() hum.JumpPower = Options["MOVE_JUMP_VAL"].Value end)
+                    end
+                end)
+            end
+        end,
+    })
+    MovePlus:AddSlider("MOVE_FOV_VAL", {
+        Text = "FOV",
+        Default = 70, Min = 50, Max = 120, Rounding = 0,
+        Callback = function(Value)
+            if Toggles["MOVE_FOV"] and Toggles["MOVE_FOV"].Value then
+                pcall(function() cam.FieldOfView = Value end)
+            end
+        end,
+    })
+    MovePlus:AddToggle("MOVE_FOV", {
+        Text = "Custom FOV",
+        Default = false,
+        Callback = function(Value)
+            if fovConn then fovConn:Disconnect() fovConn = nil end
+            if Value then
+                fovConn = RunService.RenderStepped:Connect(function()
+                    if not Toggles["MOVE_FOV"].Value then return end
+                    pcall(function() cam.FieldOfView = Options["MOVE_FOV_VAL"].Value end)
+                end)
+            else
+                pcall(function() cam.FieldOfView = 70 end)
+            end
+        end,
+    })
+    MovePlus:AddToggle("MOVE_THIRDPERSON", {
+        Text = "Third Person",
+        Default = false,
+        Callback = function(Value)
+            pcall(function()
+                if Value then
+                    lp.CameraMode = Enum.CameraMode.Classic
+                    lp.CameraMaxZoomDistance = 40
+                    lp.CameraMinZoomDistance = 10
+                else
+                    lp.CameraMode = Enum.CameraMode.Classic
+                    lp.CameraMaxZoomDistance = 13
+                    lp.CameraMinZoomDistance = 0.5
+                end
+            end)
+        end,
+    })
+    MovePlus:AddDivider()
+    MovePlus:AddButton({
+        Text = "Reset Movement",
+        Func = function()
+            pcall(function()
+                if speedConn then speedConn:Disconnect() speedConn = nil end
+                if gravConn then gravConn:Disconnect() gravConn = nil end
+                if fovConn then fovConn:Disconnect() fovConn = nil end
+                if jumpConn then jumpConn:Disconnect() jumpConn = nil end
+                local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+                if h then h.WalkSpeed, h.JumpPower = 16, 50 end
+                workspace.Gravity = 196.2
+                cam.FieldOfView = 70
+            end)
+            for _, id in ipairs({ "MOVE_SPEED", "MOVE_GRAVITY", "MOVE_JUMP", "MOVE_FOV", "MOVE_THIRDPERSON" }) do
+                if Toggles[id] and Toggles[id].Value then Toggles[id]:SetValue(false) end
+            end
+            Library:Notify("Movement reset", 2)
+        end,
+    })
+    Library:OnUnload(function()
+        pcall(weatherCleanup)
+        pcall(stopLightning)
+        if speedConn then speedConn:Disconnect() speedConn = nil end
+        if gravConn then gravConn:Disconnect() gravConn = nil end
+        if fovConn then fovConn:Disconnect() fovConn = nil end
+        if jumpConn then jumpConn:Disconnect() jumpConn = nil end
+    end);
+    end)()
+    ;(function()
+    -- ============================================================
+    --  combat plus â€” hitbox expander, overlays, anti-afk, fullbright
+    -- ============================================================
+    local CombatPlus = Tabs.Extras:AddLeftGroupbox("Combat+")
+    local hitboxConn
+    local hitboxOrig = {}
+    local function restoreHitboxes()
+        for part, size in pairs(hitboxOrig) do
+            if part.Parent then pcall(function() part.Size = size end) end
+        end
+        table.clear(hitboxOrig)
+    end
+    local HITBOX_LIMBS = { "HumanoidRootPart", "UpperTorso", "LowerTorso", "Torso" }
+    local function expandChar(char, scale)
+        for _, name in ipairs(HITBOX_LIMBS) do
+            local part = char:FindFirstChild(name)
+            if part and part:IsA("BasePart") then
+                if not hitboxOrig[part] then hitboxOrig[part] = part.Size end
+                pcall(function()
+                    part.Size = hitboxOrig[part] * scale
+                    part.CanCollide = false
+                end)
+            end
+        end
+    end
+    CombatPlus:AddSlider("HITBOX_SCALE", {
+        Text = "Expand Size",
+        Default = 2.5, Min = 1, Max = 8, Rounding = 1,
+        Suffix = "x",
+        Callback = function(Value)
+            if Toggles["HITBOX_EXPAND"] and Toggles["HITBOX_EXPAND"].Value then
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= lp and plr.Character and plr:GetAttribute("TeamID") ~= lp:GetAttribute("TeamID") then
+                        expandChar(plr.Character, Value)
+                    end
+                end
+            end
+        end,
+    })
+    CombatPlus:AddToggle("HITBOX_EXPAND", {
+        Text = "Hitbox Expander",
+        Default = false,
+        Callback = function(Value)
+            if hitboxConn then hitboxConn:Disconnect() hitboxConn = nil end
+            if Value then
+                hitboxConn = RunService.Heartbeat:Connect(function()
+                    if not Toggles["HITBOX_EXPAND"].Value then return end
+                    local scale = Options["HITBOX_SCALE"].Value
+                    for _, plr in ipairs(Players:GetPlayers()) do
+if plr ~= lp and plr.Character and (plr:GetAttribute("TeamID") == nil or lp:GetAttribute("TeamID") == nil or plr:GetAttribute("TeamID") ~= lp:GetAttribute("TeamID")) then
+                            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                            if hum and hum.Health > 0 then
+                                expandChar(plr.Character, scale)
+                            end
+                        end
+                    end
+                end)
+            else
+                restoreHitboxes()
+            end
+        end,
+    })
+    local overlayConn
+    local OVERLAY_PATTERNS = { "flash", "damage", "blood", "hurt", "hitmark", "blur", "lowhp", "vignette" }
+    local function isOverlayGui(gui)
+        local name = tostring(gui.Name):lower()
+        for _, pat in ipairs(OVERLAY_PATTERNS) do
+            if name:find(pat, 1, true) then return true end
+        end
+        return false
+    end
+    local function sweepOverlays()
+        local pg = lp:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, gui in ipairs(pg:GetChildren()) do
+            if gui:IsA("ScreenGui") and isOverlayGui(gui) then
+                pcall(function() gui.Enabled = false end)
+            end
+        end
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("BlurEffect") or e:IsA("ColorCorrectionEffect") then
+                pcall(function() e.Enabled = false end)
+            end
+        end
+    end
+    CombatPlus:AddToggle("COMBAT_NO_OVERLAY", {
+        Text = "No Flash/Overlay",
+        Default = false,
+        Callback = function(Value)
+            if overlayConn then overlayConn:Disconnect() overlayConn = nil end
+            if Value then
+                sweepOverlays()
+                overlayConn = lp.PlayerGui.DescendantAdded:Connect(function(desc)
+                    if not Toggles["COMBAT_NO_OVERLAY"].Value then return end
+                    task.wait(0.05)
+                    if desc:IsA("ScreenGui") and isOverlayGui(desc) then
+                        pcall(function() desc.Enabled = false end)
+                    elseif desc.Parent and desc.Parent:IsA("ScreenGui") and isOverlayGui(desc.Parent) then
+                        pcall(function() desc.Parent.Enabled = false end)
+                    end
+                end)
+            end
+        end,
+    })
+    local afkConn
+    CombatPlus:AddToggle("COMBAT_ANTI_AFK", {
+        Text = "Anti AFK",
+        Default = true,
+        Callback = function(Value)
+            if afkConn then afkConn:Disconnect() afkConn = nil end
+            if Value then
+                afkConn = lp.Idled:Connect(function()
+                    pcall(function()
+                        local vu = game:GetService("VirtualUser")
+                        vu:CaptureController()
+                        vu:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+                        task.wait(0.1)
+                        vu:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+                    end)
+                end)
+            end
+        end,
+    })
+    local brightConn
+    local brightBackup = nil
+    CombatPlus:AddToggle("COMBAT_FULLBRIGHT", {
+        Text = "Fullbright",
+        Default = false,
+        Callback = function(Value)
+            if brightConn then brightConn:Disconnect() brightConn = nil end
+            if Value then
+                brightBackup = {
+                    Ambient = Lighting.Ambient,
+                    OutdoorAmbient = Lighting.OutdoorAmbient,
+                    Brightness = Lighting.Brightness,
+                    GlobalShadows = Lighting.GlobalShadows,
+                    FogEnd = Lighting.FogEnd,
+                }
+                brightConn = RunService.RenderStepped:Connect(function()
+                    if not Toggles["COMBAT_FULLBRIGHT"].Value then return end
+                    pcall(function()
+                        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+                        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+                        Lighting.Brightness = 2
+                        Lighting.GlobalShadows = false
+                        Lighting.FogEnd = 100000
+                    end)
+                end)
+            else
+                pcall(function()
+                    if brightBackup then
+                        Lighting.Ambient = brightBackup.Ambient
+                        Lighting.OutdoorAmbient = brightBackup.OutdoorAmbient
+                        Lighting.Brightness = brightBackup.Brightness
+                        Lighting.GlobalShadows = brightBackup.GlobalShadows
+                        Lighting.FogEnd = brightBackup.FogEnd
+                    end
+                end)
+            end
+        end,
+    })
+    CombatPlus:AddDivider()
+    CombatPlus:AddButton({
+        Text = "Fake Lag Spike",
+        Func = function()
+            Library:Notify("lagging...", 3)
+            local fr = Instance.new("Frame")
+            fr.Size = UDim2.new(1, 0, 1, 0)
+            fr.BackgroundColor3 = Color3.new(0, 0, 0)
+            fr.BackgroundTransparency = 0.4
+            fr.Parent = Instance.new("ScreenGui", gethui and gethui() or game:GetService("CoreGui"))
+            task.delay(1.2, function() fr:Destroy() end)
+        end,
+    })
+
+    -- ============================================================
+    --  esp plus â€” chams, head markers, distance, ammo bars
+    -- ============================================================
+    local EspPlus = Tabs.Extras:AddRightGroupbox("ESP+")
+
+    local chamHighlights = {}
+    local function clearChams()
+        for plr, hl in pairs(chamHighlights) do
+            pcall(function() hl:Destroy() end)
+            chamHighlights[plr] = nil
+        end
+    end
+    local function applyCham(plr, fill, outline)
+        if plr == lp then return end
+        local char = plr.Character
+        if not char or not char.Parent then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return end
+        if chamHighlights[plr] then
+            pcall(function()
+                chamHighlights[plr].FillColor = fill
+                chamHighlights[plr].OutlineColor = outline
+            end)
+            return
+        end
+        local hl = Instance.new("Highlight")
+        hl.FillColor = fill
+        hl.FillTransparency = 0.4
+        hl.OutlineColor = outline
+        hl.OutlineTransparency = 0
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Adornee = char
+        hl.Parent = char
+        chamHighlights[plr] = hl
+    end
+    local function refreshChams()
+        if not Toggles["ESP_CHAMS"].Value then return end
+        local fill = Options["ESP_CHAMS_FILL"].Value
+        local outline = Options["ESP_CHAMS_OUTLINE"].Value
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if isEnemy(plr) then applyCham(plr, fill, outline) end
+        end
+    end
+    EspPlus:AddToggle("ESP_CHAMS", {
+        Text = "Chams",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                refreshChams()
+            else
+                clearChams()
+            end
+        end,
+    })
+    EspPlus:AddLabel("Cham Fill"):AddColorPicker("ESP_CHAMS_FILL", {
+        Text = "Cham Fill",
+        Default = Color3.fromRGB(160, 80, 255),
+        Callback = function() if Toggles["ESP_CHAMS"].Value then refreshChams() end end,
+    })
+    EspPlus:AddLabel("Cham Outline"):AddColorPicker("ESP_CHAMS_OUTLINE", {
+        Text = "Cham Outline",
+        Default = Color3.fromRGB(255, 255, 255),
+        Callback = function() if Toggles["ESP_CHAMS"].Value then refreshChams() end end,
+    })
+    local markerBillboards = {}
+    local function clearMarkers()
+        for plr, bb in pairs(markerBillboards) do
+            pcall(function() bb:Destroy() end)
+            markerBillboards[plr] = nil
+        end
+    end
+    local function buildMarker(shape, size, color)
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.new(0, size * 2, 0, size * 2)
+        bb.AlwaysOnTop = true
+        bb.LightInfluence = 0
+        if shape == "Cross" then
+            local h = Instance.new("Frame")
+            h.AnchorPoint = Vector2.new(0.5, 0.5)
+            h.Position = UDim2.new(0.5, 0, 0.5, 0)
+            h.Size = UDim2.new(1, 0, 0, 2)
+            h.BackgroundColor3 = color
+            h.BorderSizePixel = 0
+            h.Parent = bb
+            local v = h:Clone()
+            v.Size = UDim2.new(0, 2, 1, 0)
+            v.Parent = bb
+        elseif shape == "Diamond" then
+            local f = Instance.new("Frame")
+            f.AnchorPoint = Vector2.new(0.5, 0.5)
+            f.Position = UDim2.new(0.5, 0, 0.5, 0)
+            f.Size = UDim2.new(0, size * 0.7, 0, size * 0.7)
+            f.BackgroundColor3 = color
+            f.BorderSizePixel = 0
+            f.Rotation = 45
+            f.Parent = bb
+        else
+            local f = Instance.new("Frame")
+            f.AnchorPoint = Vector2.new(0.5, 0.5)
+            f.Position = UDim2.new(0.5, 0, 0.5, 0)
+            f.Size = UDim2.new(0, size, 0, size)
+            f.BackgroundColor3 = color
+            f.BackgroundTransparency = 0.35
+            f.BorderSizePixel = 0
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(1, 0)
+            c.Parent = f
+            local s = Instance.new("UIStroke")
+            s.Color = color
+            s.Thickness = 2
+            s.Parent = f
+            f.Parent = bb
+        end
+        return bb
+    end
+    local function refreshMarkers()
+        clearMarkers()
+        if not Toggles["ESP_HEAD_MARKER"].Value then return end
+        local shape = Options["ESP_MARKER_SHAPE"].Value
+        local size = Options["ESP_MARKER_SIZE"].Value
+        local color = Options["ESP_MARKER_COLOR"].Value
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if isEnemy(plr) and plr.Character then
+                local head = plr.Character:FindFirstChild("Head")
+                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                if head and hum and hum.Health > 0 then
+                    local bb = buildMarker(shape, size, color)
+                    bb.Name = "SiahMarker"
+                    bb.Adornee = head
+                    bb.Parent = head
+                    markerBillboards[plr] = bb
+                end
+            end
+        end
+    end
+    EspPlus:AddToggle("ESP_HEAD_MARKER", {
+        Text = "Head Marker",
+        Default = false,
+        Callback = function(Value)
+            if Value then refreshMarkers() else clearMarkers() end
+        end,
+    })
+    EspPlus:AddDropdown("ESP_MARKER_SHAPE", {
+        Text = "Shape",
+        Values = { "Circle", "Cross", "Diamond" },
+        Default = "Circle",
+        Callback = function() if Toggles["ESP_HEAD_MARKER"].Value then refreshMarkers() end end,
+    })
+    EspPlus:AddSlider("ESP_MARKER_SIZE", {
+        Text = "Marker Size",
+        Default = 16, Min = 6, Max = 48, Rounding = 0,
+        Callback = function() if Toggles["ESP_HEAD_MARKER"].Value then refreshMarkers() end end,
+    })
+    EspPlus:AddLabel("Marker Color"):AddColorPicker("ESP_MARKER_COLOR", {
+        Text = "Marker Color",
+        Default = Color3.fromRGB(255, 80, 80),
+        Callback = function() if Toggles["ESP_HEAD_MARKER"].Value then refreshMarkers() end end,
+    })
+    local distDrawings = {}
+    local distConn = nil
+    local function clearDistDrawings()
+        for _, pair in pairs(distDrawings) do
+            pcall(function() pair[1]:Remove() end)
+            pcall(function() pair[2]:Remove() end)
+        end
+        table.clear(distDrawings)
+    end
+    local function startDistanceESP()
+        if distConn then distConn:Disconnect() distConn = nil end
+        clearDistDrawings()
+        distConn = RunService.RenderStepped:Connect(function()
+            if not Toggles["ESP_DISTANCE"].Value then return end
+            local maxDist = Options["ESP_DISTANCE_MAX"].Value
+            local color = Options["ESP_DISTANCE_COLOR"].Value
+            local camPos = cam.CFrame.Position
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if isEnemy(plr) and plr.Character then
+                    local head = plr.Character:FindFirstChild("Head")
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if head and hum and hum.Health > 0 then
+                        local studs = (head.Position - camPos).Magnitude
+                        if studs <= maxDist then
+                            local sp, vis = cam:WorldToViewportPoint(head.Position + Vector3.new(0, 1.6, 0))
+                            local pair = distDrawings[plr]
+                            if not pair then
+                                local outline = Drawing.new("Text")
+                                outline.Center = true
+                                outline.Outline = true
+                                outline.Size = 12
+                                outline.Font = Drawing.Fonts.UI
+                                local txt = Drawing.new("Text")
+                                txt.Center = true
+                                txt.Outline = true
+                                txt.Size = 12
+                                txt.Font = Drawing.Fonts.UI
+                                pair = { outline, txt }
+                                distDrawings[plr] = pair
+                            end
+                            local text = tostring(math.floor(studs)) .. "m"
+                            pair[1].Visible = vis
+                            pair[2].Visible = vis
+                            if vis then
+                                pair[1].Text = text
+                                pair[1].Color = Color3.new(0, 0, 0)
+                                pair[1].Position = Vector2.new(sp.X + 1, sp.Y + 1)
+                                pair[2].Text = text
+                                pair[2].Color = color
+                                pair[2].Position = Vector2.new(sp.X, sp.Y)
+                            end
+                        else
+                            local pair = distDrawings[plr]
+                            if pair then
+                                pcall(function() pair[1]:Remove() pair[2]:Remove() end)
+                                distDrawings[plr] = nil
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+    EspPlus:AddToggle("ESP_DISTANCE", {
+        Text = "Distance ESP",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                startDistanceESP()
+            else
+                if distConn then distConn:Disconnect() distConn = nil end
+                clearDistDrawings()
+            end
+        end,
+    })
+    EspPlus:AddSlider("ESP_DISTANCE_MAX", {
+        Text = "Max Distance",
+        Default = 500, Min = 50, Max = 2000, Rounding = 0,
+        Suffix = " studs",
+        Callback = function() end,
+    })
+    EspPlus:AddLabel("Distance Color"):AddColorPicker("ESP_DISTANCE_COLOR", {
+        Text = "Distance Color",
+        Default = Color3.fromRGB(255, 255, 255),
+        Callback = function() end,
+    })
+    EspPlus:AddDivider()
+    EspPlus:AddToggle("ESP_SPAWN_PROTECT", {
+        Text = "See Spawns (2s tag)",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                Library:Notify("spawn tagger armed", 2)
+            end
+        end,
+    })
+    local function watchEspRespawn(plr)
+        if plr == lp then return end
+        plr.CharacterAdded:Connect(function(char)
+            task.wait(0.5)
+            if Toggles["ESP_HEAD_MARKER"].Value then refreshMarkers() end
+            if Toggles["ESP_CHAMS"].Value then refreshChams() end
+        end)
+    end
+    for _, plr in ipairs(Players:GetPlayers()) do watchEspRespawn(plr) end
+    local markerWatch = Players.PlayerAdded:Connect(watchEspRespawn)
+    Library:OnUnload(function()
+        pcall(restoreHitboxes)
+        pcall(clearChams)
+        pcall(clearMarkers)
+        pcall(clearDistDrawings)
+        if distConn then distConn:Disconnect() distConn = nil end
+        if hitboxConn then hitboxConn:Disconnect() hitboxConn = nil end
+        if overlayConn then overlayConn:Disconnect() overlayConn = nil end
+        if afkConn then afkConn:Disconnect() afkConn = nil end
+        if brightConn then brightConn:Disconnect() brightConn = nil end
+        if markerWatch then markerWatch:Disconnect() markerWatch = nil end
+    end);
+    end)()
+    ;(function()
+    -- ============================================================
+    --  crosshair studio + qol
+    -- ============================================================
+    local CrossGroup = Tabs.Extras:AddRightGroupbox("Crosshair")
+    local crossState = { enabled = false, lines = {}, dot = nil, gap = 6, thick = 2, size = 8, color = Color3.new(0, 1, 0), dotOn = true, outline = true }
+    local function destroyCrosshair()
+        for _, d in ipairs(crossState.lines) do pcall(function() d:Remove() end) end
+        table.clear(crossState.lines)
+        if crossState.dot then pcall(function() crossState.dot:Remove() end) crossState.dot = nil end
+    end
+    local function makeLine()
+        local l = Drawing.new("Line")
+        l.Thickness = crossState.thick
+        l.Visible = false
+        if crossState.outline then
+            local o = Drawing.new("Line")
+            o.Thickness = crossState.thick + 2
+            o.Color = Color3.new(0, 0, 0)
+            o.Visible = false
+            table.insert(crossState.lines, o)
+        end
+        table.insert(crossState.lines, l)
+        return l
+    end
+    local function buildCrosshair()
+        destroyCrosshair()
+        if not crossState.enabled then return end
+        for _ = 1, 4 do makeLine() end
+        if crossState.dotOn then
+            crossState.dot = Drawing.new("Circle")
+            crossState.dot.Filled = true
+            crossState.dot.Radius = 2
+            crossState.dot.Color = crossState.color
+            crossState.dot.Visible = false
+        end
+    end
+    local crossConn = nil
+    local function crossLoop()
+        if crossConn then crossConn:Disconnect() crossConn = nil end
+        crossConn = RunService.RenderStepped:Connect(function()
+            if not crossState.enabled then return end
+            local vp = cam.ViewportSize
+            local cx, cy = vp.X / 2, vp.Y / 2
+            local g = crossState.gap
+            local s = crossState.size
+            local endpoints = {
+                { cx - g - s, cy, cx - g, cy },
+                { cx + g, cy, cx + g + s, cy },
+                { cx, cy - g - s, cx, cy - g },
+                { cx, cy + g, cx, cy + g + s },
+            }
+            local idx = 1
+            for _, seg in ipairs(endpoints) do
+                local outer = crossState.lines[idx]
+                local inner = crossState.lines[idx + 1]
+                if outer then
+                    outer.From = Vector2.new(seg[1], seg[2])
+                    outer.To = Vector2.new(seg[3], seg[4])
+                    outer.Color = crossState.color
+                    outer.Visible = true
+                end
+                if inner and crossState.outline then
+                    inner.From = Vector2.new(seg[1], seg[2])
+                    inner.To = Vector2.new(seg[3], seg[4])
+                    inner.Visible = true
+                end
+                idx = idx + (crossState.outline and 2 or 1)
+            end
+            if crossState.dot then
+                crossState.dot.Position = Vector2.new(cx, cy)
+                crossState.dot.Visible = true
+            end
+        end)
+    end
+    CrossGroup:AddToggle("CROSS_ENABLED", {
+        Text = "Custom Crosshair",
+        Default = false,
+        Callback = function(Value)
+            crossState.enabled = Value
+            if Value then
+                buildCrosshair()
+                crossLoop()
+            else
+                if crossConn then crossConn:Disconnect() crossConn = nil end
+                destroyCrosshair()
+            end
+        end,
+    })
+    CrossGroup:AddSlider("CROSS_GAP", {
+        Text = "Gap",
+        Default = 6, Min = 0, Max = 30, Rounding = 0,
+        Callback = function(Value)
+            crossState.gap = Value
+            if crossState.enabled then buildCrosshair() end
+        end,
+    })
+    CrossGroup:AddSlider("CROSS_SIZE", {
+        Text = "Length",
+        Default = 8, Min = 2, Max = 40, Rounding = 0,
+        Callback = function(Value)
+            crossState.size = Value
+            if crossState.enabled then buildCrosshair() end
+        end,
+    })
+    CrossGroup:AddSlider("CROSS_THICK", {
+        Text = "Thickness",
+        Default = 2, Min = 1, Max = 6, Rounding = 0,
+        Callback = function(Value)
+            crossState.thick = Value
+            if crossState.enabled then buildCrosshair() end
+        end,
+    })
+    CrossGroup:AddLabel("Color"):AddColorPicker("CROSS_COLOR", {
+        Text = "Color",
+        Default = Color3.fromRGB(0, 255, 120),
+        Callback = function(Value)
+            crossState.color = Value
+            if crossState.enabled then buildCrosshair() end
+        end,
+    })
+    CrossGroup:AddToggle("CROSS_DOT", {
+        Text = "Center Dot",
+        Default = true,
+        Callback = function(Value)
+            crossState.dotOn = Value
+            if crossState.enabled then buildCrosshair() end
+        end,
+    })
+    CrossGroup:AddToggle("CROSS_OUTLINE", {
+        Text = "Outline",
+        Default = true,
+        Callback = function(Value)
+            crossState.outline = Value
+            if crossState.enabled then buildCrosshair() end
+        end,
+    })
+
+    local QoLGroup = Tabs.Extras:AddRightGroupbox("QoL")
+    QoLGroup:AddButton({
+        Text = "Respawn",
+        Func = function()
+            pcall(function() lp:LoadCharacter() end)
+        end,
+    })
+    QoLGroup:AddButton({
+        Text = "Rejoin Server",
+        Func = function()
+            Library:Notify("rejoining...", 3)
+            pcall(function()
+                game:GetService("TeleportService"):Teleport(game.PlaceId, lp)
+            end)
+        end,
+    })
+    local muteConn
+    local mutedBackup = {}
+    QoLGroup:AddToggle("QOL_MUTE", {
+        Text = "Mute All Sounds",
+        Default = false,
+        Callback = function(Value)
+            if muteConn then muteConn:Disconnect() muteConn = nil end
+            if Value then
+                for _, s in ipairs(workspace:GetDescendants()) do
+                    if s:IsA("Sound") then
+                        if mutedBackup[s] == nil then mutedBackup[s] = s.Volume end
+                        pcall(function() s.Volume = 0 end)
+                    end
+                end
+                muteConn = workspace.DescendantAdded:Connect(function(desc)
+                    if desc:IsA("Sound" ) and Toggles["QOL_MUTE"].Value then
+                        task.wait(0.05)
+                        pcall(function() desc.Volume = 0 end)
+                    end
+                end)
+            else
+                for s, vol in pairs(mutedBackup) do
+                    if s.Parent then pcall(function() s.Volume = vol end) end
+                end
+                table.clear(mutedBackup)
+            end
+        end,
+    })
+    QoLGroup:AddButton({
+        Text = "FPS Unlock",
+        Func = function()
+            local ok = false
+            pcall(function()
+                if type(setfpscap) == "function" then
+                    setfpscap(10000)
+                    ok = true
+                end
+            end)
+            if not ok then
+                pcall(function()
+                    local settings = UserSettings().GameSettings
+                    settings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel10
+                    ok = true
+                end)
+            end
+            Library:Notify(ok and "fps cap removed" or "this executor blocks fps unlock", 3)
+        end,
+    })
+    QoLGroup:AddDivider()
+    QoLGroup:AddLabel("session stats")
+    local sessionStart = tick()
+    local sessionLabel = QoLGroup:AddLabel("Session: 0m 0s")
+    task.spawn(function()
+        while not Library.Unloaded do
+            local elapsed = tick() - sessionStart
+            local mins = math.floor(elapsed / 60)
+            local secs = math.floor(elapsed % 60)
+            pcall(function()
+                sessionLabel:SetText(("Session: %dm %ds"):format(mins, secs))
+            end)
+            task.wait(1)
+        end
+    end)
+    local plrCountLabel = QoLGroup:AddLabel("Players: 1")
+    task.spawn(function()
+        while not Library.Unloaded do
+            pcall(function() plrCountLabel:SetText("Players: " .. #Players:GetPlayers()) end)
+            task.wait(2)
+        end
+    end)
+
+    -- ============================================================
+    --  config manager
+    -- ============================================================
+    local CONFIG_DIR = "siah_lua_v2/configs"
+    local CONFIG_FLAG = "siah_lua_v2/lastconfig.txt"
+    local function ensureConfigDirs()
+        pcall(function()
+            if not isfolder("siah_lua_v2") then makefolder("siah_lua_v2") end
+            if not isfolder(CONFIG_DIR) then makefolder(CONFIG_DIR) end
+        end)
+    end
+    local function serializeSettings()
+        local data = {}
+        for id, toggle in pairs(Toggles) do
+            if type(id) == "string" and type(toggle) == "table" then
+                local ok, state = pcall(function() return toggle.Value end)
+                if ok and type(state) == "boolean" then data["T:" .. id] = state end
+            end
+        end
+        for id, opt in pairs(Options) do
+            if type(id) == "string" and type(opt) == "table" then
+                local ok, v = pcall(function() return opt.Value end)
+                if ok then
+                    local t = type(v)
+                    if t == "string" or t == "number" or t == "boolean" then
+                        data["O:" .. id] = v
+                    elseif t == "table" then
+                        local ok2, enc = pcall(function() return HttpService:JSONEncode(v) end)
+                        if ok2 then data["J:" .. id] = enc end
+                    end
+                end
+            end
+        end
+        return data
+    end
+    local function applySettings(data)
+        local applied = 0
+        local missed = 0
+        for key, v in pairs(data) do
+            local kind, id = key:match("^(%a):(.+)$")
+            local done = false
+            if kind == "T" and Toggles[id] then
+                done = pcall(function() Toggles[id]:SetValue(v, true) end)
+            elseif kind == "O" and Options[id] then
+                done = pcall(function() Options[id]:SetValue(v, true) end)
+            elseif kind == "J" and Options[id] then
+                done = pcall(function()
+                    Options[id]:SetValue(HttpService:JSONDecode(v), true)
+                end)
+            end
+            if done then applied = applied + 1 else missed = missed + 1 end
+        end
+        return applied, missed
+    end
+    local function configPath(name)
+        return CONFIG_DIR .. "/" .. name .. ".json"
+    end
+    local function saveConfig(name)
+        if not name or name == "" then return false, "name required" end
+        if name:find("[/\\]") then return false, "no slashes" end
+        ensureConfigDirs()
+        local payload = HttpService:JSONEncode({
+            version = 1,
+            savedAt = os.date("%Y-%m-%d %H:%M:%S"),
+            author = "siah lua v2 by itsjsiah",
+            settings = serializeSettings(),
+        })
+        writefile(configPath(name), payload)
+        return true
+    end
+    local function loadConfig(name)
+        if not name or name == "" then return false, "name required" end
+        local path = configPath(name)
+        if not isfile(path) then return false, "config not found" end
+        local raw = readfile(path)
+        local ok, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+        if not ok or type(decoded) ~= "table" then return false, "corrupt json" end
+        local settings = decoded.settings or decoded
+        local applied, missed = applySettings(settings)
+        return true, ("applied %d, skipped %d"):format(applied, missed)
+    end
+    local function deleteConfig(name)
+        local path = configPath(name)
+        if not isfile(path) then return false end
+        delfile(path)
+        if isfile(CONFIG_FLAG) and readfile(CONFIG_FLAG) == name then
+            pcall(function() delfile(CONFIG_FLAG) end)
+        end
+        return true
+    end
+    local function listConfigs()
+        ensureConfigDirs()
+        local names = {}
+        local ok, files = pcall(function() return listfiles(CONFIG_DIR) end)
+        if ok and type(files) == "table" then
+            for _, f in ipairs(files) do
+                local base = f:match("([^/\\]+)%.json$")
+                if base then table.insert(names, base) end
+            end
+        end
+        table.sort(names)
+        return names
+    end
+    local function refreshConfigList()
+        local names = listConfigs()
+        local opt = Options["CONFIG_LIST"]
+        if opt then
+            pcall(function() opt:SetValues(names) end)
+            pcall(function() if opt.Refresh then opt:Refresh(names, true) end end)
+        end
+        return names
+    end
+    local ConfigGroup = Tabs.Config:AddLeftGroupbox("Config Manager")
+    local ConfigInfo = Tabs.Config:AddRightGroupbox("Info")
+    ConfigGroup:AddLabel("save / load your whole menu")
+    ConfigGroup:AddInput("CONFIG_NAME", {
+        Text = "Config Name",
+        Default = "",
+        Placeholder = "my setup",
+        Callback = function(Value) end,
+    })
+    ConfigGroup:AddDropdown("CONFIG_LIST", {
+        Text = "Saved Configs",
+        Values = {},
+        AllowNull = true,
+        Default = nil,
+        Callback = function(Value)
+            if Value and Value ~= "" then
+                Options["CONFIG_NAME"]:SetValue(Value)
+            end
+        end,
+    })
+    ConfigGroup:AddButton({
+        Text = "Save",
+        Func = function()
+            local name = Options["CONFIG_NAME"].Value
+            local ok, msg = saveConfig(name)
+            if ok then
+                refreshConfigList()
+                Library:Notify("saved config '" .. name .. "'", 3)
+            else
+                Library:Notify("save failed: " .. tostring(msg), 4)
+            end
+        end,
+    })
+    ConfigGroup:AddButton({
+        Text = "Load",
+        Func = function()
+            local name = Options["CONFIG_NAME"].Value
+            local ok, msg = loadConfig(name)
+            if ok then
+                Library:Notify("loaded '" .. name .. "' â€” " .. tostring(msg), 4)
+            else
+                Library:Notify("load failed: " .. tostring(msg), 4)
+            end
+        end,
+    })
+    ConfigGroup:AddButton({
+        Text = "Delete",
+        Func = function()
+            local name = Options["CONFIG_NAME"].Value
+            if deleteConfig(name) then
+                refreshConfigList()
+                Library:Notify("deleted '" .. name .. "'", 3)
+            else
+                Library:Notify("config not found", 3)
+            end
+        end,
+    })
+    ConfigGroup:AddButton({
+        Text = "Refresh List",
+        Func = function()
+            local names = refreshConfigList()
+            Library:Notify(#names .. " configs on disk", 3)
+        end,
+    })
+    ConfigGroup:AddDivider()
+    ConfigGroup:AddButton({
+        Text = "Copy Config JSON",
+        Func = function()
+            local payload = HttpService:JSONEncode({
+                version = 1,
+                settings = serializeSettings(),
+            })
+            local ok = pcall(function()
+                if type(setclipboard) == "function" then setclipboard(payload)
+                elseif type(toclipboard) == "function" then toclipboard(payload)
+                else error("no clipboard api") end
+            end)
+            Library:Notify(ok and "config json copied" or "clipboard blocked by executor", 3)
+        end,
+    })
+    ConfigGroup:AddToggle("CONFIG_AUTOLOAD", {
+        Text = "Auto-Load On Join",
+        Default = false,
+        Callback = function(Value)
+            pcall(function()
+                if Value then
+                    local name = Options["CONFIG_NAME"].Value
+                    if name ~= "" then
+                        ensureConfigDirs()
+                        writefile(CONFIG_FLAG, name)
+                        Library:Notify("autoload armed for '" .. name .. "'", 3)
+                    else
+                        Library:Notify("set a config name first", 3)
+                        if Toggles["CONFIG_AUTOLOAD"].Value then
+                            Toggles["CONFIG_AUTOLOAD"]:SetValue(false)
+                        end
+                    end
+                elseif isfile(CONFIG_FLAG) then
+                    delfile(CONFIG_FLAG)
+                end
+            end)
+        end,
+    })
+    ConfigInfo:AddLabel("siah lua v2 by itsjsiah")
+    ConfigInfo:AddDivider()
+    ConfigInfo:AddLabel("configs store every toggle, slider,")
+    ConfigInfo:AddLabel("dropdown and color in this menu.")
+    ConfigInfo:AddLabel("files live in your executor workspace:")
+    ConfigInfo:AddLabel(CONFIG_DIR)
+    ConfigInfo:AddDivider()
+    ConfigInfo:AddButton({
+        Text = "Reset All Settings",
+        Func = function()
+            for id, toggle in pairs(Toggles) do
+                if type(id) == "string" and id ~= "CONFIG_AUTOLOAD" then
+                    pcall(function()
+                        local d = toggle.Default
+                        if type(d) == "boolean" then toggle:SetValue(d, true) end
+                    end)
+                end
+            end
+            Library:Notify("settings reset to defaults", 3)
+        end,
+    })
+    pcall(function()
+        ensureConfigDirs()
+        if isfile(CONFIG_FLAG) then
+            local last = readfile(CONFIG_FLAG):gsub("%s+", "")
+            if last ~= "" and isfile(configPath(last)) then
+                task.delay(1, function()
+                    local ok, msg = loadConfig(last)
+                    if ok then
+                        Library:Notify("auto-loaded '" .. last .. "'", 4)
+                        pcall(function() Options["CONFIG_NAME"]:SetValue(last) end)
+                        pcall(function() Toggles["CONFIG_AUTOLOAD"]:SetValue(true, false) end)
+                    end
+                end)
+            end
+        end
+        refreshConfigList()
+    end)
+
+    -- ============================================================
+    --  ui polish â€” theme picker + custom cursor pass
+    -- ============================================================
+    pcall(function()
+        if ThemeManager and ThemeManager.GetThemes then
+            local ok, themes = pcall(function() return ThemeManager:GetThemes() end)
+            if ok and type(themes) == "table" and #themes > 0 then
+                table.sort(themes)
+                MenuGroup:AddDropdown("SIAH_THEME", {
+                    Text = "Theme",
+                    Values = themes,
+                    Default = nil,
+                    Callback = function(Value)
+                        pcall(function() ThemeManager:SetTheme(Value) end)
+                    end,
+                })
+            end
+        end
+    end)
+    pcall(function()
+        MenuGroup:AddButton({
+            Text = "Copy Invite Link",
+            Func = function()
+                pcall(function()
+                    if type(setclipboard) == "function" then
+                        setclipboard("https://discord.gg/siah")
+                    end
+                end)
+                Library:Notify("invite copied", 3)
+            end,
+        })
+    end)
+    pcall(function()
+        local cfgGroupBtn = Tabs.Config:AddLeftGroupbox("Executor Info")
+        local execName = "unknown"
+        pcall(function()
+            if identifyexecutor then execName = identifyexecutor()
+            elseif getexecutorname then execName = getexecutorname() end
+        end)
+        cfgGroupBtn:AddLabel("Executor: " .. tostring(execName))
+        cfgGroupBtn:AddLabel("Place: " .. game.PlaceId)
+        cfgGroupBtn:AddLabel("Job: " .. game.JobId)
+        cfgGroupBtn:AddButton({
+            Text = "Copy Job ID",
+            Func = function()
+                pcall(function()
+                    if type(setclipboard) == "function" then setclipboard(game.JobId) end
+                end)
+                Library:Notify("job id copied", 2)
+            end,
+        })
+    end)
+    Library:OnUnload(function()
+        pcall(destroyCrosshair)
+        if crossConn then crossConn:Disconnect() crossConn = nil end
+        if muteConn then muteConn:Disconnect() muteConn = nil end
+    end);
+    end)()
+    ;(function()
+    WeatherGroup:AddDivider()
+    WeatherGroup:AddLabel("v2 rebuild — itsjsiah")
+    -- ============================================================
+    --  spectate + corner box esp + weapon esp + world tint
+    -- ============================================================
+    local SpecGroup = Tabs.Extras:AddLeftGroupbox("Spectate")
+    local spectating = nil
+    local specConn = nil
+    local function stopSpectate()
+        if specConn then specConn:Disconnect() specConn = nil end
+        spectating = nil
+        pcall(function()
+            cam.CameraSubject = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        end)
+    end
+    local function startSpectate(plr)
+        stopSpectate()
+        if not plr or not plr.Character then return end
+        local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        spectating = plr
+        cam.CameraSubject = hum
+        specConn = plr.CharacterAdded:Connect(function(char)
+            local h = char:WaitForChild("Humanoid", 5)
+            if h and spectating == plr then
+                cam.CameraSubject = h
+            end
+        end)
+        Library:Notify("spectating " .. plr.Name, 3)
+    end
+    local function specList()
+        local names = {}
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= lp then table.insert(names, plr.Name) end
+        end
+        table.sort(names)
+        return names
+    end
+    SpecGroup:AddDropdown("SPEC_TARGET", {
+        Text = "Player",
+        Values = specList(),
+        AllowNull = true,
+        Default = nil,
+        Callback = function(Value)
+            local plr = Value and Players:FindFirstChild(Value)
+            if plr and plr ~= lp then
+                if Toggles["SPEC_ON"].Value then
+                    startSpectate(plr)
+                else
+                    pcall(function() Options["SPEC_TARGET"]:SetValue(Value, false) end)
+                end
+            end
+        end,
+    })
+    SpecGroup:AddToggle("SPEC_ON", {
+        Text = "Spectate",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                local name = Options["SPEC_TARGET"].Value
+                local plr = name and Players:FindFirstChild(name)
+                if plr and plr ~= lp then
+                    startSpectate(plr)
+                else
+                    Library:Notify("pick a player first", 3)
+                    Toggles["SPEC_ON"]:SetValue(false, false)
+                end
+            else
+                stopSpectate()
+            end
+        end,
+    })
+    SpecGroup:AddButton({
+        Text = "Next Player",
+        Func = function()
+            local list = specList()
+            if #list == 0 then return end
+            local currentIdx = 1
+            for i, n in ipairs(list) do
+                if n == (spectating and spectating.Name) then currentIdx = i break end
+            end
+            local nextName = list[(currentIdx % #list) + 1]
+            Options["SPEC_TARGET"]:SetValue(nextName)
+            if Toggles["SPEC_ON"].Value then
+                startSpectate(Players:FindFirstChild(nextName))
+            end
+        end,
+    })
+    SpecGroup:AddButton({
+        Text = "Refresh List",
+        Func = function()
+            local names = specList()
+            pcall(function() Options["SPEC_TARGET"]:SetValues(names) end)
+            Library:Notify(#names .. " players", 2)
+        end,
+    })
+    SpecGroup:AddDivider()
+    SpecGroup:AddToggle("SPEC_FREECAM_NOTE", {
+        Text = "Lock Camera On Respawn",
+        Default = true,
+        Callback = function(Value) end,
+    })
+
+    local CornerGroup = Tabs.Extras:AddRightGroupbox("Corner Box")
+    local cornerDrawings = {}
+    local cornerConn = nil
+    local function clearCornerBoxes()
+        for _, set in pairs(cornerDrawings) do
+            for _, d in ipairs(set) do pcall(function() d:Remove() end) end
+        end
+        table.clear(cornerDrawings)
+    end
+    local function makeCornerSet()
+        local set = {}
+        for _ = 1, 16 do
+            local l = Drawing.new("Line")
+            l.Visible = false
+            table.insert(set, l)
+        end
+        return set
+    end
+    local function drawCorners(set, x, y, w, h, color)
+        local cl = math.max(6, math.floor(w * 0.25))
+        local seg = {
+            { x, y, x + cl, y }, { x, y, x, y + cl },
+            { x + w - cl, y, x + w, y }, { x + w, y, x + w, y + cl },
+            { x, y + h - cl, x, y + h }, { x, y + h, x + cl, y + h },
+            { x + w, y + h - cl, x + w, y + h }, { x + w - cl, y + h, x + w, y + h },
+        }
+        for i, s in ipairs(seg) do
+            local o = set[i]
+            o.From = Vector2.new(s[1], s[2])
+            o.To = Vector2.new(s[3], s[4])
+            o.Color = Color3.new(0, 0, 0)
+            o.Thickness = 5
+            o.Visible = true
+            local c = set[i + 8]
+            c.From = Vector2.new(s[1], s[2])
+            c.To = Vector2.new(s[3], s[4])
+            c.Color = color
+            c.Thickness = 2
+            c.Visible = true
+        end
+    end
+    local function startCornerESP()
+        if cornerConn then cornerConn:Disconnect() cornerConn = nil end
+        clearCornerBoxes()
+        cornerConn = RunService.RenderStepped:Connect(function()
+            if not Toggles["CORNER_BOX"].Value then return end
+            local color = Options["CORNER_BOX_COLOR"].Value
+            local alive = {}
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if isEnemy(plr) and plr.Character then
+                    local head = plr.Character:FindFirstChild("Head")
+                    local root = plr.Character:FindFirstChild("HumanoidRootPart")
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if head and root and hum and hum.Health > 0 then
+                        local headSP, headVis = cam:WorldToViewportPoint(head.Position + Vector3.new(0, 0.6, 0))
+                        local rootSP = cam:WorldToViewportPoint(root.Position - Vector3.new(0, 3.2, 0))
+                        if headVis then
+                            local boxH = math.abs(headSP.Y - rootSP.Y)
+                            local boxW = boxH * 0.5
+                            local x = headSP.X - boxW / 2
+                            local y = headSP.Y
+                            local set = cornerDrawings[plr]
+                            if not set then
+                                set = makeCornerSet()
+                                cornerDrawings[plr] = set
+                            end
+                            drawCorners(set, x, y, boxW, boxH, color)
+                            alive[plr] = true
+                        end
+                    end
+                end
+            end
+            for plr, set in pairs(cornerDrawings) do
+                if not alive[plr] then
+                    for _, d in ipairs(set) do pcall(function() d:Remove() end) end
+                    cornerDrawings[plr] = nil
+                end
+            end
+        end)
+    end
+    CornerGroup:AddToggle("CORNER_BOX", {
+        Text = "Corner Boxes",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                startCornerESP()
+            else
+                if cornerConn then cornerConn:Disconnect() cornerConn = nil end
+                clearCornerBoxes()
+            end
+        end,
+    })
+    CornerGroup:AddLabel("Corner Color"):AddColorPicker("CORNER_BOX_COLOR", {
+        Text = "Corner Color",
+        Default = Color3.fromRGB(160, 80, 255),
+        Callback = function() end,
+    })
+    CornerGroup:AddButton({
+        Text = "White",
+        Func = function() Options["CORNER_BOX_COLOR"]:SetValue(Color3.fromRGB(255, 255, 255)) end,
+    })
+    CornerGroup:AddButton({
+        Text = "Purple",
+        Func = function() Options["CORNER_BOX_COLOR"]:SetValue(Color3.fromRGB(160, 80, 255)) end,
+    })
+    CornerGroup:AddButton({
+        Text = "Red",
+        Func = function() Options["CORNER_BOX_COLOR"]:SetValue(Color3.fromRGB(255, 60, 60)) end,
+    })
+    CornerGroup:AddButton({
+        Text = "Cyan",
+        Func = function() Options["CORNER_BOX_COLOR"]:SetValue(Color3.fromRGB(60, 220, 255)) end,
+    })
+
+    local WeaponEspGroup = Tabs.Extras:AddRightGroupbox("Weapon ESP")
+    local weaponDrawings = {}
+    local weaponConn = nil
+    local function clearWeaponEsp()
+        for _, set in pairs(weaponDrawings) do
+            pcall(function() set[1]:Remove() end)
+            pcall(function() set[2]:Remove() end)
+        end
+        table.clear(weaponDrawings)
+    end
+    local function readHeldTool(plr)
+        local char = plr.Character
+        if not char then return nil end
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then return tool.Name end
+        local bp = plr:FindFirstChild("Backpack")
+        if bp then
+            local equipped = bp:FindFirstChildOfClass("Tool")
+            if equipped then return equipped.Name end
+        end
+        return nil
+    end
+    local function startWeaponESP()
+        if weaponConn then weaponConn:Disconnect() weaponConn = nil end
+        clearWeaponEsp()
+        weaponConn = RunService.RenderStepped:Connect(function()
+            if not Toggles["WEAPON_ESP"].Value then return end
+            local color = Options["WEAPON_ESP_COLOR"].Value
+            local offset = Options["WEAPON_ESP_OFFSET"].Value
+            local alive = {}
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if isEnemy(plr) and plr.Character then
+                    local head = plr.Character:FindFirstChild("Head")
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if head and hum and hum.Health > 0 then
+                        local tool = readHeldTool(plr)
+                        if tool then
+                            local sp, vis = cam:WorldToViewportPoint(head.Position + Vector3.new(0, offset, 0))
+                            local set = weaponDrawings[plr]
+                            if not set then
+                                local outline = Drawing.new("Text")
+                                outline.Center = true
+                                outline.Outline = true
+                                outline.Size = 12
+                                outline.Font = Drawing.Fonts.UI
+                                local txt = Drawing.new("Text")
+                                txt.Center = true
+                                txt.Outline = true
+                                txt.Size = 12
+                                txt.Font = Drawing.Fonts.UI
+                                set = { outline, txt }
+                                weaponDrawings[plr] = set
+                            end
+                            set[1].Visible = vis
+                            set[2].Visible = vis
+                            if vis then
+                                set[1].Text = tool
+                                set[1].Color = Color3.new(0, 0, 0)
+                                set[1].Position = Vector2.new(sp.X + 1, sp.Y + 1)
+                                set[2].Text = tool
+                                set[2].Color = color
+                                set[2].Position = Vector2.new(sp.X, sp.Y)
+                            end
+                            alive[plr] = true
+                        end
+                    end
+                end
+            end
+            for plr, set in pairs(weaponDrawings) do
+                if not alive[plr] then
+                    pcall(function() set[1]:Remove() set[2]:Remove() end)
+                    weaponDrawings[plr] = nil
+                end
+            end
+        end)
+    end
+    WeaponEspGroup:AddToggle("WEAPON_ESP", {
+        Text = "Held Weapon",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                startWeaponESP()
+            else
+                if weaponConn then weaponConn:Disconnect() weaponConn = nil end
+                clearWeaponEsp()
+            end
+        end,
+    })
+    WeaponEspGroup:AddLabel("Weapon Color"):AddColorPicker("WEAPON_ESP_COLOR", {
+        Text = "Weapon Color",
+        Default = Color3.fromRGB(255, 210, 80),
+        Callback = function() end,
+    })
+    WeaponEspGroup:AddSlider("WEAPON_ESP_OFFSET", {
+        Text = "Y Offset",
+        Default = 1.9, Min = 0.5, Max = 5, Rounding = 1,
+        Callback = function() end,
+    })
+
+    local TintGroup = Tabs.Extras:AddRightGroupbox("World Tint")
+    local tintCC = nil
+    local function applyTint()
+        if not tintCC or not tintCC.Parent then
+            tintCC = Instance.new("ColorCorrectionEffect")
+            tintCC.Name = "SiahTint"
+            tintCC.Parent = Lighting
+        end
+        tintCC.Brightness = Options["TINT_BRIGHTNESS"].Value
+        tintCC.Contrast = Options["TINT_CONTRAST"].Value
+        tintCC.Saturation = Options["TINT_SATURATION"].Value
+        tintCC.TintColor = Options["TINT_COLOR"].Value
+        tintCC.Enabled = true
+    end
+    local function removeTint()
+        if tintCC then pcall(function() tintCC:Destroy() end) tintCC = nil end
+    end
+    TintGroup:AddToggle("TINT_ENABLED", {
+        Text = "Enable Tint",
+        Default = false,
+        Callback = function(Value)
+            if Value then applyTint() else removeTint() end
+        end,
+    })
+    TintGroup:AddSlider("TINT_BRIGHTNESS", {
+        Text = "Brightness",
+        Default = 0, Min = -0.3, Max = 0.3, Rounding = 2,
+        Callback = function() if Toggles["TINT_ENABLED"].Value then applyTint() end end,
+    })
+    TintGroup:AddSlider("TINT_CONTRAST", {
+        Text = "Contrast",
+        Default = 0, Min = -0.5, Max = 1, Rounding = 2,
+        Callback = function() if Toggles["TINT_ENABLED"].Value then applyTint() end end,
+    })
+    TintGroup:AddSlider("TINT_SATURATION", {
+        Text = "Saturation",
+        Default = 0, Min = -1, Max = 1, Rounding = 2,
+        Callback = function() if Toggles["TINT_ENABLED"].Value then applyTint() end end,
+    })
+    TintGroup:AddLabel("Tint Color"):AddColorPicker("TINT_COLOR", {
+        Text = "Tint Color",
+        Default = Color3.fromRGB(255, 255, 255),
+        Callback = function() if Toggles["TINT_ENABLED"].Value then applyTint() end end,
+    })
+    TintGroup:AddButton({
+        Text = "Clear Tint",
+        Func = function()
+            removeTint()
+            if Toggles["TINT_ENABLED"].Value then Toggles["TINT_ENABLED"]:SetValue(false) end
+        end,
+    })
+    TintGroup:AddDivider()
+    local timeOfDayConn = nil
+    TintGroup:AddSlider("TIME_OF_DAY", {
+        Text = "Time Of Day",
+        Default = 14, Min = 0, Max = 24, Rounding = 1,
+        Suffix = "h",
+        Callback = function(Value)
+            if Toggles["TIME_LOCK"].Value then
+                pcall(function() Lighting.ClockTime = Value end)
+            end
+        end,
+    })
+    TintGroup:AddToggle("TIME_LOCK", {
+        Text = "Lock Time",
+        Default = false,
+        Callback = function(Value)
+            if timeOfDayConn then timeOfDayConn:Disconnect() timeOfDayConn = nil end
+            if Value then
+                local t = Options["TIME_OF_DAY"].Value
+                pcall(function() Lighting.ClockTime = t end)
+                timeOfDayConn = RunService.Heartbeat:Connect(function()
+                    if not Toggles["TIME_LOCK"].Value then return end
+                    pcall(function() Lighting.ClockTime = Options["TIME_OF_DAY"].Value end)
+                end)
+            end
+        end,
+    })
+    Library:OnUnload(function()
+        pcall(clearCornerBoxes)
+        pcall(clearWeaponEsp)
+        pcall(stopSpectate)
+        pcall(removeTint)
+        if weaponConn then weaponConn:Disconnect() weaponConn = nil end
+        if cornerConn then cornerConn:Disconnect() cornerConn = nil end
+        if timeOfDayConn then timeOfDayConn:Disconnect() timeOfDayConn = nil end
+    end);
+    end)()
+    ;(function()
+    -- ============================================================
+    --  radar + death log
+    -- ============================================================
+    local RadarGroup = Tabs.Extras:AddLeftGroupbox("Radar")
+    local radarState = { enabled = false, size = 170, range = 250, conns = {}, drawings = {} }
+    local function destroyRadar()
+        local dots = radarState.drawings.dots
+        if dots then
+            for _, d in pairs(dots) do pcall(function() d:Remove() end) end
+        end
+        for k, d in pairs(radarState.drawings) do
+            if k ~= "dots" then pcall(function() d:Remove() end) end
+        end
+        table.clear(radarState.drawings)
+        for _, c in ipairs(radarState.conns) do pcall(function() c:Disconnect() end) end
+        table.clear(radarState.conns)
+        radarState.enabled = false
+    end
+    local function radarDot()
+        local dot = Drawing.new("Square")
+        dot.Filled = true
+        dot.Size = Vector2.new(6, 6)
+        dot.Visible = false
+        return dot
+    end
+    local function buildRadar()
+        destroyRadar()
+        radarState.enabled = true
+        local bg = Drawing.new("Square")
+        bg.Filled = true
+        bg.Color = Color3.fromRGB(14, 14, 18)
+        bg.Transparency = 0.35
+        bg.Size = Vector2.new(radarState.size, radarState.size)
+        bg.Visible = true
+        radarState.drawings.bg = bg
+        local border = Drawing.new("Square")
+        border.Filled = false
+        border.Color = Color3.fromRGB(160, 80, 255)
+        border.Thickness = 2
+        border.Size = bg.Size
+        border.Visible = true
+        radarState.drawings.border = border
+        local ring = Drawing.new("Circle")
+        ring.Filled = false
+        ring.Color = Color3.fromRGB(80, 50, 130)
+        ring.Thickness = 1
+        ring.Radius = radarState.size * 0.33
+        ring.Visible = true
+        radarState.drawings.ring = ring
+        local me = Drawing.new("Circle")
+        me.Filled = true
+        me.Color = Color3.fromRGB(120, 255, 140)
+        me.Radius = 4
+        me.Visible = true
+        radarState.drawings.me = me
+        local dir = Drawing.new("Line")
+        dir.Color = Color3.fromRGB(120, 255, 140)
+        dir.Thickness = 2
+        dir.Visible = true
+        radarState.drawings.dir = dir
+        radarState.drawings.dots = {}
+        radarState.conns[#radarState.conns + 1] = RunService.RenderStepped:Connect(function()
+            if not radarState.enabled then return end
+            local vp = cam.ViewportSize
+            local margin = 24
+            local cx = vp.X - margin - radarState.size / 2
+            local cy = margin + radarState.size / 2
+            local half = radarState.size / 2
+            bg.Position = Vector2.new(cx - half, cy - half)
+            border.Position = bg.Position
+            ring.Position = Vector2.new(cx, cy)
+            me.Position = Vector2.new(cx, cy)
+            dir.From = Vector2.new(cx, cy)
+            local yaw = math.atan2(-cam.CFrame.LookVector.X, -cam.CFrame.LookVector.Z)
+            dir.To = Vector2.new(cx + math.sin(yaw) * (half - 8), cy - math.cos(yaw) * (half - 8))
+            dir.Visible = true
+            local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+            if not root then return end
+            local myPos = root.Position
+            local seen = {}
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= lp and plr.Character then
+                    local pRoot = plr.Character:FindFirstChild("HumanoidRootPart")
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if pRoot and hum and hum.Health > 0 then
+                        local rel = pRoot.Position - myPos
+                        local rx = rel.X * math.cos(-yaw) - rel.Z * math.sin(-yaw)
+                        local rz = rel.X * math.sin(-yaw) + rel.Z * math.cos(-yaw)
+                        local mag = math.sqrt(rx * rx + rz * rz)
+                        local scale = (half - 10) / radarState.range
+                        local px = cx + rx * scale
+                        local py = cy - rz * scale
+                        if mag > radarState.range then
+                            local nx = (rx / mag)
+                            local nz = (rz / mag)
+                            px = cx + nx * (half - 10)
+                            py = cy - nz * (half - 10)
+                        end
+                        local dot = radarState.drawings.dots[plr]
+                        if not dot then
+                            dot = radarDot()
+                            radarState.drawings.dots[plr] = dot
+                        end
+                        dot.Position = Vector2.new(px - 3, py - 3)
+                        dot.Color = plr:GetAttribute("TeamID") == lp:GetAttribute("TeamID")
+                            and Color3.fromRGB(90, 160, 255)
+                            or Color3.fromRGB(255, 80, 80)
+                        dot.Visible = true
+                        seen[plr] = true
+                    end
+                end
+            end
+            for plr, dot in pairs(radarState.drawings.dots) do
+                if not seen[plr] or not plr.Parent then
+                    pcall(function() dot:Remove() end)
+                    radarState.drawings.dots[plr] = nil
+                end
+            end
+        end)
+    end
+    RadarGroup:AddToggle("RADAR_ENABLED", {
+        Text = "Radar",
+        Default = false,
+        Callback = function(Value)
+            radarState.enabled = Value
+            if Value then buildRadar() else destroyRadar() end
+        end,
+    })
+    RadarGroup:AddSlider("RADAR_RANGE", {
+        Text = "Range",
+        Default = 250, Min = 50, Max = 1000, Rounding = 0,
+        Suffix = " studs",
+        Callback = function(Value)
+            radarState.range = Value
+            if radarState.enabled then buildRadar() end
+        end,
+    })
+    RadarGroup:AddSlider("RADAR_SIZE", {
+        Text = "Size",
+        Default = 170, Min = 100, Max = 300, Rounding = 0,
+        Callback = function(Value)
+            radarState.size = Value
+            if radarState.enabled then buildRadar() end
+        end,
+    })
+    RadarGroup:AddLabel("green = you, red = enemy")
+    RadarGroup:AddLabel("blue = teammate")
+
+    local LogGroup = Tabs.Extras:AddRightGroupbox("Death Log")
+    local logLines = {}
+    local logDrawings = {}
+    local logConn = nil
+    local function pushLog(text)
+        local stamp = os.date("%H:%M:%S")
+        table.insert(logLines, 1, stamp .. "  " .. text)
+        if #logLines > 7 then table.remove(logLines) end
+    end
+    local function rebuildLogDrawings()
+        for _, d in ipairs(logDrawings) do pcall(function() d:Remove() end) end
+        table.clear(logDrawings)
+        for i, line in ipairs(logLines) do
+            local out = Drawing.new("Text")
+            out.Text = line
+            out.Size = 13
+            out.Font = Drawing.Fonts.UI
+            out.Center = false
+            out.Outline = true
+            out.Color = Color3.new(0, 0, 0)
+            out.Position = Vector2.new(21, 19 + (i - 1) * 16)
+            out.Visible = false
+            local txt = Drawing.new("Text")
+            txt.Text = line
+            txt.Size = 13
+            txt.Font = Drawing.Fonts.UI
+            txt.Center = false
+            txt.Outline = true
+            txt.Color = Color3.fromRGB(230, 230, 240)
+            txt.Position = Vector2.new(20, 18 + (i - 1) * 16)
+            txt.Visible = false
+            table.insert(logDrawings, out)
+            table.insert(logDrawings, txt)
+        end
+    end
+    local function watchPlayer(plr)
+        if plr == lp then return end
+        plr.CharacterAdded:Connect(function(char)
+            local hum = char:WaitForChild("Humanoid", 10)
+            if not hum then return end
+            hum.Died:Connect(function()
+                pushLog(plr.Name .. " died")
+                if Toggles["DEATHLOG_ON"].Value then
+                    rebuildLogDrawings()
+                    for _, d in ipairs(logDrawings) do d.Visible = true end
+                end
+            end)
+        end)
+        if plr.Character then
+            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum.Died:Connect(function()
+                    pushLog(plr.Name .. " died")
+                    if Toggles["DEATHLOG_ON"].Value then
+                        rebuildLogDrawings()
+                        for _, d in ipairs(logDrawings) do d.Visible = true end
+                    end
+                end)
+            end
+        end
+    end
+    for _, plr in ipairs(Players:GetPlayers()) do watchPlayer(plr) end
+    Players.PlayerAdded:Connect(watchPlayer)
+    lp.CharacterAdded:Connect(function(char)
+        local hum = char:WaitForChild("Humanoid", 10)
+        if hum then
+            hum.Died:Connect(function()
+                pushLog("you died")
+                if Toggles["DEATHLOG_ON"].Value then
+                    rebuildLogDrawings()
+                    for _, d in ipairs(logDrawings) do d.Visible = true end
+                end
+            end)
+        end
+    end)
+    LogGroup:AddToggle("DEATHLOG_ON", {
+        Text = "Show Log",
+        Default = false,
+        Callback = function(Value)
+            if Value then
+                rebuildLogDrawings()
+                for _, d in ipairs(logDrawings) do d.Visible = true end
+            else
+                for _, d in ipairs(logDrawings) do d.Visible = false end
+            end
+        end,
+    })
+    LogGroup:AddButton({
+        Text = "Clear Log",
+        Func = function()
+            table.clear(logLines)
+            rebuildLogDrawings()
+            if Toggles["DEATHLOG_ON"].Value then
+                for _, d in ipairs(logDrawings) do d.Visible = true end
+            end
+        end,
+    })
+    LogGroup:AddLabel("logs deaths in the lobby")
+    LogGroup:AddLabel("timestamped, top left corner")
+    Library:OnUnload(function()
+        pcall(destroyRadar)
+        for _, d in ipairs(logDrawings) do pcall(function() d:Remove() end) end
+        table.clear(logDrawings)
+    end);
+    end)()
+    ;(function()
+    -- ============================================================
+    --  streak counter + about
+    -- ============================================================
+    local StreakGroup = Tabs.Misc:AddLeftGroupbox("Streak")
+    local streakState = { count = 0, best = 0, enabled = false, drawn = nil, outline = nil }
+    local function drawStreak()
+        if streakState.outline then pcall(function() streakState.outline:Remove() end) streakState.outline = nil end
+        if streakState.drawn then pcall(function() streakState.drawn:Remove() end) streakState.drawn = nil end
+        if not streakState.enabled then return end
+        local vp = cam.ViewportSize
+        local text = ("streak: %d   best: %d"):format(streakState.count, streakState.best)
+        local o = Drawing.new("Text")
+        o.Text = text
+        o.Size = 16
+        o.Font = Drawing.Fonts.UI
+        o.Center = true
+        o.Outline = true
+        o.Color = Color3.new(0, 0, 0)
+        o.Position = Vector2.new(vp.X / 2 + 1, 71)
+        local t = Drawing.new("Text")
+        t.Text = text
+        t.Size = 16
+        t.Font = Drawing.Fonts.UI
+        t.Center = true
+        t.Outline = true
+        t.Color = Color3.fromRGB(255, 200, 60)
+        t.Position = Vector2.new(vp.X / 2, 70)
+        streakState.outline = o
+        streakState.drawn = t
+    end
+    local lastDeaths = {}
+    local function watchStreakDeaths()
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= lp and plr.Character and not lastDeaths[plr] then
+                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    lastDeaths[plr] = true
+                    hum.Died:Connect(function()
+                        if not streakState.enabled then return end
+                        local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+                        local theirRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                        if myRoot and theirRoot and (myRoot.Position - theirRoot.Position).Magnitude < 150 then
+                            streakState.count = streakState.count + 1
+                            if streakState.count > streakState.best then
+                                streakState.best = streakState.count
+                            end
+                            drawStreak()
+                        end
+                    end)
+                end
+            end
+        end
+    end
+    local streakConn = nil
+    StreakGroup:AddToggle("STREAK_ON", {
+        Text = "Streak Counter",
+        Default = false,
+        Callback = function(Value)
+            streakState.enabled = Value
+            if streakConn then streakConn:Disconnect() streakConn = nil end
+            if Value then
+                for _, plr in ipairs(Players:GetPlayers()) do lastDeaths[plr] = nil end
+                watchStreakDeaths()
+                streakConn = RunService.Heartbeat:Connect(watchStreakDeaths)
+                lp.CharacterAdded:Connect(function(char)
+                    local hum = char:WaitForChild("Humanoid", 10)
+                    if hum then
+                        hum.Died:Connect(function()
+                            streakState.count = 0
+                            if streakState.enabled then drawStreak() end
+                        end)
+                    end
+                end)
+                drawStreak()
+                Library:Notify("streak counter on", 2)
+            else
+                drawStreak()
+            end
+        end,
+    })
+    StreakGroup:AddButton({
+        Text = "Reset Streak",
+        Func = function()
+            streakState.count = 0
+            if streakState.enabled then drawStreak() end
+        end,
+    })
+    StreakGroup:AddLabel("counts kills near you")
+    StreakGroup:AddLabel("resets when you die")
+
+    local AboutGroup = Tabs.Config:AddRightGroupbox("About")
+    AboutGroup:AddLabel("siah lua v2 by itsjsiah")
+    AboutGroup:AddLabel("rebuilt on the kickahook v3 framework")
+    AboutGroup:AddDivider()
+    AboutGroup:AddLabel("v2 changelog:")
+    AboutGroup:AddLabel("+ weather engine (rain/snow/blizzard/fog)")
+    AboutGroup:AddLabel("+ config manager with autoload")
+    AboutGroup:AddLabel("+ chams, corner boxes, weapon + distance esp")
+    AboutGroup:AddLabel("+ head markers, radar, death log, streaks")
+    AboutGroup:AddLabel("+ hitbox expander, spectate, crosshair studio")
+    AboutGroup:AddLabel("+ movement+ (speed/gravity/jump/fov/thirdperson)")
+    AboutGroup:AddLabel("+ world tint, time lock, qol tools")
+    AboutGroup:AddDivider()
+    AboutGroup:AddButton({
+        Text = "Copy Script Name",
+        Func = function()
+            pcall(function()
+                if type(setclipboard) == "function" then
+                    setclipboard("siah lua v2 by itsjsiah")
+                end
+            end)
+            Library:Notify("copied", 2)
+        end,
+    })
+    Library:OnUnload(function()
+        if streakConn then streakConn:Disconnect() streakConn = nil end
+        if streakState.outline then pcall(function() streakState.outline:Remove() end) streakState.outline = nil end
+        if streakState.drawn then pcall(function() streakState.drawn:Remove() end) streakState.drawn = nil end
+    end);
+    end)()
+    print("siah lua v2 by itsjsiah Loaded successfully!")
 end
 
 pcall(function()
